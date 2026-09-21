@@ -1,0 +1,25 @@
+# python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+
+# app data
+data/
+*.db
+*.db-wal
+*.db-shm
+.env
+
+# node (only used to rebuild Tailwind)
+node_modules/
+
+# misc
+.DS_Store
+.idea/
+.vscode/
+docs/demo-exports/

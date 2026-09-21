@@ -1,0 +1,21 @@
+services:
+  magic-import:
+    build: .
+    image: magic-import:latest
+    container_name: magic-import
+    ports:
+      - "8000:8000"
+    environment:
+      DATA_DIR: /data
+      DELETE_UPLOADS_AFTER_PROCESSING: "true"
+      UPLOAD_RETENTION_HOURS: "24"
+      MAX_UPLOAD_MB: "20"
+      # Optional AI-assisted mapping (leave empty to run fully offline)
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+    volumes:
+      - magic_import_data:/data
+    restart: unless-stopped
+
+volumes:
+  magic_import_data:
