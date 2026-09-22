@@ -1,0 +1,99 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  lint:
+    name: ruff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ruff
+      - run: ruff check app tests scripts demo-data
+      - run: ruff format --check app tests scripts demo-data
+
+  test:
+    name: pytest (py${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - run: pip install -e ".[dev]"
+      # demo datasets are deterministic; regenerate so tests never depend on committed binaries
+      - run: python demo-data/generate_demo_data.py
+      - run: pytest -q --durations=5
+        env:
+          GEMINI_API_KEY: ""   # AI is mocked; CI never needs a real key
+
+  docker:
+    name: docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: magic-import:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Smoke test container
+        run: |
+          docker run -d --name mi -p 8000:8000 magic-import:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8000/healthz; then echo; break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:8000/healthz | grep '"ok"'
+          curl -fsS http://127.0.0.1:8000/api/v1/schemas | grep 'Customer Import v1'
+          curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8000/ | grep 200
+          docker logs mi
+          docker rm -f mi
+
+  e2e:
+    name: browser demo (Playwright)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: pip install -e ".[dev]"
+      - run: python -m playwright install --with-deps chromium
+      - run: python demo-data/generate_demo_data.py
+      - name: Build front-end assets (Tailwind CSS + vendored Alpine.js)
+        run: sh scripts/build_frontend.sh
+      - name: Start app
+        run: |
+          mkdir -p data
+          nohup uvicorn app.main:app --host 127.0.0.1 --port 8000 > uvicorn.log 2>&1 &
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8000/healthz && break; sleep 1; done
+      - run: python scripts/browser_demo.py --out e2e-screenshots
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-screenshots
+          path: |
+            e2e-screenshots
+            uvicorn.log
