@@ -297,11 +297,18 @@ app/
 │   ├── formula_guard.py    spreadsheet formula injection protection
 │   └── ai/                 base.py (interface, masking), gemini.py (REST provider)
 ├── templates/              Jinja2 + Alpine.js (wizard steps in templates/steps/)
-└── static/                 compiled Tailwind CSS, vendored Alpine.js
+└── static/                 compiled Tailwind CSS, vendored Alpine.js (generated, see below)
 tests/                      141 tests
 demo-data/                  generator + three demo files
 scripts/browser_demo.py     Playwright end-to-end demo + screenshots
+scripts/build_frontend.sh   rebuilds app.css + alpine.min.js from pinned npm packages
 ```
+
+`app/static/app.css`, `app/static/vendor/alpine.min.js`, the demo `.xlsx`/`.csv` files and the
+README screenshots are all **generated**: `scripts/build_frontend.sh` (Tailwind 4.3.3, Alpine 3.17.4),
+`demo-data/generate_demo_data.py` (seed 42) and `scripts/browser_demo.py`. The `Assets` workflow
+regenerates and commits them whenever the UI, the generator or the demo script changes, so the
+repository never depends on hand-edited binaries.
 
 Business logic lives in `app/services` and has no FastAPI dependency; the API and the UI are
 two thin layers over it. Data is stored in SQLite (JSON columns for rows, one table for issues).
