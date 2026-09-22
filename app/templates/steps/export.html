@@ -1,0 +1,125 @@
+{# STEP 7 — Export #}
+<div x-data="exportStep()" x-init="load()">
+  <div class="mb-5">
+    <h2 class="text-lg font-semibold text-slate-900">Export</h2>
+    <p class="mt-1 text-sm text-slate-600">Files use target field names. Cells starting with <span class="kbd">= + - @</span> are neutralised against spreadsheet formula injection.</p>
+  </div>
+
+  <div class="grid lg:grid-cols-3 gap-6">
+    <div class="lg:col-span-2 space-y-6">
+      <div class="card card-pad">
+        <h3 class="text-sm font-semibold text-slate-900">Rows to export</h3>
+        <div class="mt-3 grid sm:grid-cols-3 gap-3">
+          <template x-for="opt in scopes" :key="opt.value">
+            <label class="flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition" :class="scope === opt.value ? 'border-indigo-500 bg-indigo-50/60 ring-2 ring-indigo-500/20' : 'border-slate-200 hover:border-slate-300'">
+              <input type="radio" class="mt-1 accent-indigo-600" :value="opt.value" x-model="scope">
+              <span>
+                <span class="block font-medium text-slate-900" x-text="opt.label"></span>
+                <span class="block text-xs text-slate-500" x-text="opt.hint()"></span>
+              </span>
+            </label>
+          </template>
+        </div>
+
+        <h3 class="mt-6 text-sm font-semibold text-slate-900">Format</h3>
+        <div class="mt-3 grid sm:grid-cols-3 gap-3">
+          <button class="group flex flex-col items-start gap-1 rounded-xl border border-slate-200 p-4 text-left hover:border-indigo-400 hover:bg-indigo-50/40 transition" @click="download('xlsx')">
+            <span class="badge badge-high">XLSX</span>
+            <span class="mt-1 font-medium text-slate-900">Excel workbook</span>
+            <span class="text-xs text-slate-500">Sheet <b>Data</b> + sheet <b>Import Report</b> with mapping and summary.</span>
+          </button>
+          <button class="group flex flex-col items-start gap-1 rounded-xl border border-slate-200 p-4 text-left hover:border-indigo-400 hover:bg-indigo-50/40 transition" @click="download('csv')">
+            <span class="badge badge-info">CSV</span>
+            <span class="mt-1 font-medium text-slate-900">CSV (UTF-8)</span>
+            <span class="text-xs text-slate-500">Comma separated, BOM for Excel, target field names as header.</span>
+          </button>
+          <button class="group flex flex-col items-start gap-1 rounded-xl border border-slate-200 p-4 text-left hover:border-indigo-400 hover:bg-indigo-50/40 transition" @click="download('json')">
+            <span class="badge badge-medium">JSON</span>
+            <span class="mt-1 font-medium text-slate-900">JSON array</span>
+            <span class="text-xs text-slate-500">One object per row, <span class="kbd">null</span> for empty values.</span>
+          </button>
+        </div>
+
+        <div class="mt-6 flex flex-wrap items-center gap-3 rounded-xl border border-rose-200 bg-rose-50/60 p-4">
+          <div class="flex-1 min-w-[12rem]">
+            <p class="font-medium text-rose-900" x-text="`${MI.fmt(s.error)} rows with errors`"></p>
+            <p class="text-xs text-rose-700">Download them with an <span class="kbd">_issues</span> column, fix in a spreadsheet and re-import.</p>
+          </div>
+          <button class="btn-danger" :disabled="!s.error" @click="MI.download(`/api/v1/imports/${job.id}/export?format=errors`)">Download errors.csv</button>
+        </div>
+      </div>
+
+      <div class="card card-pad">
+        <div class="flex items-center justify-between">
+          <h3 class="text-sm font-semibold text-slate-900">Import report</h3>
+          <button class="btn-secondary btn-sm" @click="MI.download(`/api/v1/imports/${job.id}/report?download=true`)">import-report.json</button>
+        </div>
+        <template x-if="report">
+          <div class="mt-4 grid sm:grid-cols-2 gap-x-8 gap-y-3 text-sm">
+            <dl class="space-y-1.5">
+              <div class="flex justify-between gap-4"><dt class="text-slate-500">Source</dt><dd class="font-medium text-slate-900 truncate" x-text="report.source_file"></dd></div>
+              <div class="flex justify-between gap-4"><dt class="text-slate-500">Schema</dt><dd class="font-medium text-slate-900" x-text="report.schema"></dd></div>
+              <div class="flex justify-between gap-4"><dt class="text-slate-500">Rows</dt><dd class="font-medium text-slate-900" x-text="MI.fmt(report.rows)"></dd></div>
+              <div class="flex justify-between gap-4"><dt class="text-slate-500">Importable</dt><dd class="font-medium text-emerald-600" x-text="MI.fmt(report.exported_rows)"></dd></div>
+              <div class="flex justify-between gap-4"><dt class="text-slate-500">Errors</dt><dd class="font-medium text-rose-600" x-text="MI.fmt(report.errors)"></dd></div>
+              <div class="flex justify-between gap-4"><dt class="text-slate-500">Warnings</dt><dd class="font-medium text-amber-600" x-text="MI.fmt(report.warnings)"></dd></div>
+            </dl>
+            <div>
+              <p class="text-xs uppercase tracking-wide text-slate-500">Mapping</p>
+              <ul class="mt-1.5 space-y-1">
+                <template x-for="m in report.mapping" :key="m.source">
+                  <li class="flex items-center gap-2 text-slate-700"><span class="truncate" x-text="m.source"></span><span class="text-slate-300">→</span><span class="font-medium" :class="m.target ? 'text-slate-900' : 'text-slate-400 italic'" x-text="m.target || 'ignored'"></span></li>
+                </template>
+              </ul>
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <aside class="space-y-5">
+      <div class="card card-pad">
+        <h3 class="text-sm font-semibold text-slate-900">Summary</h3>
+        <div class="mt-3 progress-bar flex h-3 overflow-hidden rounded-full bg-slate-100">
+          <span class="bg-emerald-500" :style="`width:${pct(s.ready)}%`"></span>
+          <span class="bg-amber-400" :style="`width:${pct(s.warning)}%`"></span>
+          <span class="bg-rose-500" :style="`width:${pct(s.error)}%`"></span>
+        </div>
+        <dl class="mt-4 space-y-2 text-sm">
+          <div class="flex justify-between"><dt class="text-slate-500">Ready</dt><dd class="font-semibold text-emerald-600" x-text="MI.fmt(s.ready)"></dd></div>
+          <div class="flex justify-between"><dt class="text-slate-500">Warnings</dt><dd class="font-semibold text-amber-600" x-text="MI.fmt(s.warning)"></dd></div>
+          <div class="flex justify-between"><dt class="text-slate-500">Errors</dt><dd class="font-semibold text-rose-600" x-text="MI.fmt(s.error)"></dd></div>
+          <div class="flex justify-between border-t border-slate-100 pt-2"><dt class="text-slate-500">Import-ready</dt><dd class="font-semibold text-slate-900" x-text="`${s.ready_pct}%`"></dd></div>
+        </dl>
+        <template x-if="job.status !== 'completed'">
+          <button class="btn-primary mt-5 w-full" @click="complete()">Mark import as completed</button>
+        </template>
+        <template x-if="job.status === 'completed'">
+          <p class="mt-5 rounded-xl bg-emerald-50 px-3 py-2 text-center text-sm font-medium text-emerald-700">✓ Completed</p>
+        </template>
+        <a :href="`/imports/${job.id}?step=6`" class="btn-secondary mt-2 w-full">← Back to review</a>
+      </div>
+      <div class="card card-pad text-sm text-slate-600">
+        <h3 class="text-sm font-semibold text-slate-900">Privacy</h3>
+        <p class="mt-1">The uploaded file was deleted right after parsing. This job keeps the parsed rows, mapping, transformations and issues so you can come back and re-export.</p>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<script>
+function exportStep() {
+  return {
+    job: window.JOB, s: window.JOB.summary || {}, scope: 'ready', report: null,
+    scopes: [
+      { value: 'ready', label: 'Ready rows only', hint: () => `${MI.fmt((window.JOB.summary || {}).importable)} rows without errors` },
+      { value: 'all', label: 'All rows', hint: () => `${MI.fmt((window.JOB.summary || {}).rows)} rows, including errors` },
+      { value: 'errors', label: 'Error rows only', hint: () => `${MI.fmt((window.JOB.summary || {}).error)} rows to fix` },
+    ],
+    pct(n) { return this.s.rows ? (100 * (n || 0) / this.s.rows) : 0; },
+    async load() { this.report = await MI.api('GET', `/api/v1/imports/${this.job.id}/report`); },
+    download(fmt) { MI.download(`/api/v1/imports/${this.job.id}/export?format=${fmt}&scope=${this.scope}`); MI.toast(`Preparing ${fmt.toUpperCase()} (${this.scope} rows)…`, 'success', 1800); },
+    async complete() { const j = await MI.api('POST', `/api/v1/imports/${this.job.id}/complete`); this.job = j; MI.toast('Import marked as completed', 'success'); },
+  };
+}
+</script>
