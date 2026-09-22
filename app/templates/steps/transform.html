@@ -1,0 +1,180 @@
+{# STEP 4 — Transformations #}
+<div x-data="transformStep()" x-init="load()">
+  <div class="mb-5 flex flex-wrap items-start justify-between gap-4">
+    <div>
+      <h2 class="text-lg font-semibold text-slate-900">Transformations</h2>
+      <p class="mt-1 text-sm text-slate-600">Suggested from field types. Original values are always kept — any rule can be switched off later and the data recomputed.</p>
+    </div>
+    <button class="btn-primary" :disabled="busy" @click="run()">
+      <span x-show="!busy">Run validation →</span>
+      <span x-show="busy" class="inline-flex items-center gap-2"><span class="spinner !border-white/40 !border-t-white"></span> Transforming &amp; validating…</span>
+    </button>
+  </div>
+
+  <div class="grid lg:grid-cols-3 gap-6">
+    <div class="lg:col-span-2 space-y-4">
+      <div class="card">
+        <ul class="divide-y divide-slate-100">
+          <template x-for="(t, i) in transformations" :key="i">
+            <li class="flex items-center gap-4 px-5 py-3.5">
+              <button type="button" role="switch" class="toggle" :class="t.enabled ? 'bg-indigo-600' : 'bg-slate-300'" :aria-checked="t.enabled" @click="t.enabled = !t.enabled; dirty = true">
+                <span class="toggle-knob" :class="t.enabled ? 'translate-x-5' : 'translate-x-0'"></span>
+              </button>
+              <div class="min-w-0 flex-1">
+                <p class="font-medium text-slate-900" :class="!t.enabled && 'text-slate-400 line-through'" x-text="labelOf(t)"></p>
+                <p class="text-xs text-slate-500" x-text="describe(t)"></p>
+              </div>
+              <span class="badge badge-muted" x-show="t.suggested">suggested</span>
+              <button class="btn-ghost btn-sm text-slate-400 hover:text-rose-600" @click="transformations.splice(i, 1); dirty = true" title="Remove">✕</button>
+            </li>
+          </template>
+          <li x-show="!transformations.length" class="px-5 py-8 text-center text-sm text-slate-500">No transformations. Add one below or run validation as-is.</li>
+        </ul>
+      </div>
+
+      <div class="card card-pad">
+        <h3 class="text-sm font-semibold text-slate-900">Add transformation</h3>
+        <div class="mt-3 grid sm:grid-cols-3 gap-3">
+          <div>
+            <label class="label">Rule</label>
+            <select class="select" x-model="draft.kind">
+              <template x-for="[k, l] in Object.entries(kinds)" :key="k"><option :value="k" x-text="l"></option></template>
+            </select>
+          </div>
+          <div x-show="!['combine','split'].includes(draft.kind)">
+            <label class="label">Target field</label>
+            <select class="select" x-model="draft.target_field">
+              <option value="">All fields</option>
+              <template x-for="f in fields" :key="f.name"><option :value="f.name" x-text="f.name"></option></template>
+            </select>
+          </div>
+          <div x-show="draft.kind === 'case'">
+            <label class="label">Mode</label>
+            <select class="select" x-model="draft.params.mode"><option value="upper">UPPER</option><option value="lower">lower</option><option value="title">Title Case</option></select>
+          </div>
+          <div x-show="['date','datetime'].includes(draft.kind)">
+            <label class="label">Day/month order</label>
+            <select class="select" x-model="draft.params.dayfirst_str"><option value="">Auto-detect per column</option><option value="true">Day first (21/09/2026)</option><option value="false">Month first (09/21/2026)</option></select>
+          </div>
+          <div x-show="draft.kind === 'phone'">
+            <label class="label">Default region</label>
+            <input class="input" placeholder="IL (used when the number has no country code)" x-model="draft.params.region">
+          </div>
+          <div x-show="draft.kind === 'default'">
+            <label class="label">Value</label>
+            <input class="input" placeholder="e.g. IL" x-model="draft.params.value">
+          </div>
+          <div x-show="draft.kind === 'replace'" class="sm:col-span-2 grid grid-cols-2 gap-3">
+            <div><label class="label">From</label><input class="input" x-model="draft.params.from"></div>
+            <div><label class="label">To</label><input class="input" x-model="draft.params.to"></div>
+          </div>
+          <div x-show="draft.kind === 'null_normalize'" class="sm:col-span-2">
+            <label class="label">Extra empty tokens (comma separated)</label>
+            <input class="input" placeholder="TBD, unknown" x-model="draft.params.tokens_str">
+          </div>
+          <template x-if="draft.kind === 'combine'">
+            <div class="sm:col-span-3 grid sm:grid-cols-3 gap-3">
+              <div><label class="label">Into target field</label>
+                <select class="select" x-model="draft.target_field"><template x-for="f in fields" :key="f.name"><option :value="f.name" x-text="f.name"></option></template></select></div>
+              <div class="sm:col-span-2"><label class="label">Template (source columns in braces)</label>
+                <input class="input font-mono" placeholder="{Street} {House}, {City}" x-model="draft.params.template">
+                <p class="mt-1 text-xs text-slate-500">Available: <span x-text="columns.map(c => '{' + c + '}').join(' ')"></span></p></div>
+            </div>
+          </template>
+          <template x-if="draft.kind === 'split'">
+            <div class="sm:col-span-3 grid sm:grid-cols-4 gap-3">
+              <div><label class="label">Source</label>
+                <select class="select" x-model="draft.params.source"><template x-for="c in [...fields.map(f => f.name), ...columns]" :key="c"><option :value="c" x-text="c"></option></template></select></div>
+              <div><label class="label">Separator</label><input class="input" x-model="draft.params.separator" placeholder="space"></div>
+              <div><label class="label">Mode</label>
+                <select class="select" x-model="draft.params.mode"><option value="first_rest">First word / rest</option><option value="rest_last">Rest / last word</option><option value="all">Each part</option></select></div>
+              <div><label class="label">Into fields (comma)</label><input class="input" placeholder="first_name, last_name" x-model="draft.params.into_str"></div>
+            </div>
+          </template>
+        </div>
+        <div class="mt-4 flex justify-end"><button class="btn-secondary" @click="add()">Add rule</button></div>
+      </div>
+    </div>
+
+    <aside class="space-y-5">
+      <div class="card card-pad">
+        <h3 class="text-sm font-semibold text-slate-900">Default values</h3>
+        <p class="mt-1 text-xs text-slate-500">Used when a target field has no source column or the cell is empty.</p>
+        <div class="mt-3 space-y-2">
+          <template x-for="f in fields" :key="f.name">
+            <div class="flex items-center gap-2">
+              <label class="w-32 shrink-0 truncate text-sm text-slate-700" :title="f.name" x-text="f.name"></label>
+              <input class="input" :placeholder="mapped.has(f.name) ? 'fallback for empty cells' : (f.default ? `schema default: ${f.default}` : 'no source column')" x-model="defaults[f.name]" @input="dirty = true">
+            </div>
+          </template>
+        </div>
+      </div>
+      <div class="card card-pad text-sm text-slate-600">
+        <h3 class="text-sm font-semibold text-slate-900">What happens next</h3>
+        <ol class="mt-2 list-decimal space-y-1 pl-5">
+          <li>Mapped columns are copied into target fields.</li>
+          <li>Rules run in the order listed above.</li>
+          <li>Every row is validated: required, unique, type, rules, cross-field.</li>
+          <li>You review problems and fix them inline or in bulk.</li>
+        </ol>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<script>
+function transformStep() {
+  return {
+    transformations: [], fields: window.SCHEMA.fields, columns: window.JOB.columns, kinds: window.KIND_LABELS,
+    defaults: Object.assign({}, window.JOB.defaults || {}), mapped: new Set(), busy: false, dirty: false,
+    draft: { kind: 'trim', target_field: '', params: { mode: 'title', dayfirst_str: '', region: '', value: '', from: '', to: '', tokens_str: '', template: '', source: '', separator: ' ', mode: 'first_rest', into_str: '' } },
+    async load() {
+      this.transformations = await MI.api('GET', `/api/v1/imports/${window.JOB.id}/transformations`);
+      const m = await MI.api('GET', `/api/v1/imports/${window.JOB.id}/mapping`);
+      this.mapped = new Set(m.mapping.filter(x => !x.ignored && x.target_field).map(x => x.target_field));
+    },
+    labelOf(t) { return t.label || (this.kinds[t.kind] + (t.target_field ? `: ${t.target_field}` : '')); },
+    describe(t) {
+      const p = t.params || {};
+      const bits = [];
+      if (t.kind === 'phone') bits.push(p.country_field ? `uses "${p.country_field}" as region context` : (p.region ? `default region ${p.region}` : 'international numbers only'));
+      if (t.kind === 'date' || t.kind === 'datetime') bits.push(p.dayfirst === undefined ? 'day/month order auto-detected per column' : (p.dayfirst ? 'day first' : 'month first'));
+      if (t.kind === 'case') bits.push(`mode: ${p.mode}`);
+      if (t.kind === 'combine') bits.push(p.template);
+      if (t.kind === 'split') bits.push(`${p.source} → ${(p.into || []).join(', ')}`);
+      if (t.kind === 'replace') bits.push(Object.entries(p.mapping || {}).map(([a, b]) => `"${a}" → "${b}"`).join(', '));
+      if (t.kind === 'default') bits.push(`value: ${p.value}`);
+      if (t.kind === 'null_normalize') bits.push(p.tokens && p.tokens.length ? `also: ${p.tokens.join(', ')}` : 'N/A, null, none, -, —');
+      if (t.kind === 'trim') bits.push('collapses repeated spaces, empties become null');
+      if (t.kind === 'country') bits.push('Israel / IL / ISR / ישראל → IL');
+      if (t.kind === 'email') bits.push('trim + lowercase domain; invalid addresses are flagged, never "fixed"');
+      if (t.kind === 'decimal') bits.push('exact Decimal, ambiguous separators flagged');
+      return bits.join(' · ') || (t.target_field ? '' : 'applies to all fields');
+    },
+    add() {
+      const d = this.draft, p = d.params, params = {};
+      let target = d.target_field || null;
+      if (d.kind === 'case') params.mode = p.mode;
+      if (['date', 'datetime'].includes(d.kind) && p.dayfirst_str !== '') params.dayfirst = p.dayfirst_str === 'true';
+      if (d.kind === 'phone' && p.region) params.region = p.region.toUpperCase();
+      if (d.kind === 'default') { params.value = p.value; if (!target) return MI.toast('Choose a target field for the default.', 'error'); }
+      if (d.kind === 'replace') { params.mapping = {}; params.mapping[p.from] = p.to; }
+      if (d.kind === 'null_normalize' && p.tokens_str) params.tokens = p.tokens_str.split(',').map(s => s.trim()).filter(Boolean);
+      if (d.kind === 'combine') { params.template = p.template; if (!target || !p.template) return MI.toast('Combine needs a target field and a template.', 'error'); }
+      if (d.kind === 'split') { params.source = p.source; params.separator = p.separator || ' '; params.mode = p.mode; params.into = p.into_str.split(',').map(s => s.trim()).filter(Boolean); target = null; if (!params.source || !params.into.length) return MI.toast('Split needs a source and target fields.', 'error'); }
+      this.transformations.push({ kind: d.kind, target_field: target, params, enabled: true, suggested: false, label: '' });
+      this.dirty = true;
+    },
+    async run() {
+      this.busy = true;
+      try {
+        await MI.api('PUT', `/api/v1/imports/${window.JOB.id}/transformations`, { transformations: this.transformations.map(t => ({ kind: t.kind, target_field: t.target_field, params: t.params, enabled: t.enabled, suggested: t.suggested, label: t.label })) });
+        const defaults = {}; Object.entries(this.defaults).forEach(([k, v]) => { if (v) defaults[k] = v; });
+        await MI.api('PUT', `/api/v1/imports/${window.JOB.id}/defaults`, { defaults });
+        await MI.api('POST', `/api/v1/imports/${window.JOB.id}/validate`);
+        window.location.href = `/imports/${window.JOB.id}?step=5`;
+      } catch (e) { this.busy = false; }
+    },
+  };
+}
+</script>
