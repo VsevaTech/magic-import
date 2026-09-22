@@ -22,5 +22,16 @@ mkdir -p "$WORK"
 
 mkdir -p app/static/vendor
 cp "$WORK/node_modules/alpinejs/dist/cdn.min.js" app/static/vendor/alpine.min.js
-"$WORK/node_modules/.bin/tailwindcss" -i app/static/src/input.css -o app/static/app.css --minify
+
+# Tailwind resolves `@import "tailwindcss"` by walking up from the input file, so the
+# packages must be reachable from the repo root. Link them there for the duration of the build.
+LINKED=0
+if [ ! -e node_modules ]; then
+  ln -s "$(cd "$WORK" && pwd)/node_modules" node_modules
+  LINKED=1
+fi
+rc=0
+"$WORK/node_modules/.bin/tailwindcss" -i app/static/src/input.css -o app/static/app.css --minify || rc=$?
+if [ "$LINKED" = 1 ]; then rm node_modules; fi
+[ "$rc" = 0 ] || exit "$rc"
 echo "built app/static/app.css and app/static/vendor/alpine.min.js"
