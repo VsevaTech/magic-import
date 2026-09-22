@@ -1,0 +1,263 @@
+{# STEP 6 — Interactive review table #}
+<div x-data="reviewStep()" x-init="init()" @keydown.escape.window="popover = null">
+  <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+    <div>
+      <h2 class="text-lg font-semibold text-slate-900">Review &amp; fix</h2>
+      <p class="mt-1 text-sm text-slate-600">Click a highlighted cell to see what's wrong. Edits revalidate the row instantly.</p>
+    </div>
+    <div class="flex flex-wrap items-center gap-2">
+      <span class="badge badge-high !text-xs" x-text="`${MI.fmt(s.ready)} ready`"></span>
+      <span class="badge badge-medium !text-xs" x-text="`${MI.fmt(s.warning)} warnings`"></span>
+      <span class="badge badge-error !text-xs" x-text="`${MI.fmt(s.error)} errors`"></span>
+      <span class="badge badge-info !text-xs" x-text="`${s.ready_pct}% ready`"></span>
+      <button class="btn-secondary btn-sm" :disabled="!editLog.length || busy" @click="undo()" :title="editLog.length ? 'Undo: ' + editLog[editLog.length-1] : 'Nothing to undo'">↶ Undo</button>
+      <button class="btn-secondary btn-sm" @click="templateModal = true">Save mapping template</button>
+      <a :href="`/imports/${job.id}?step=7`" class="btn-primary btn-sm">Export →</a>
+    </div>
+  </div>
+
+  <template x-if="bulk.length">
+    <div class="mb-4 flex flex-wrap gap-2">
+      <template x-for="(b, i) in bulk" :key="i">
+        <button class="inline-flex items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50/70 px-3 py-2 text-sm text-indigo-900 hover:bg-indigo-100 transition" :disabled="busy" @click="applyBulk(b)">
+          <svg class="h-4 w-4 text-indigo-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 4.2L18 9l-4.2 1.8L12 15l-1.8-4.2L6 9l4.2-1.8z"/></svg>
+          <span x-text="b.label"></span>
+          <span class="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-indigo-700" x-text="`Apply to ${b.count}`"></span>
+        </button>
+      </template>
+    </div>
+  </template>
+
+  <div class="card">
+    <div class="flex flex-wrap items-center gap-2 border-b border-slate-200 px-4 py-3">
+      <div class="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5 text-sm">
+        <template x-for="[k, l] in [['', 'All'], ['ready', 'Ready'], ['warning', 'Warnings'], ['error', 'Errors']]" :key="k">
+          <button class="rounded-md px-3 py-1.5 font-medium transition" :class="status === k ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'" @click="status = k; page = 1; load()" x-text="l"></button>
+        </template>
+      </div>
+      <select class="select !w-auto text-sm" x-model="field" @change="page = 1; load()">
+        <option value="">Any column</option>
+        <template x-for="f in fields" :key="f.name"><option :value="f.name" x-text="f.name"></option></template>
+      </select>
+      <select class="select !w-auto text-sm" x-model="code" @change="page = 1; load()">
+        <option value="">Any issue</option>
+        <template x-for="[c, l] in Object.entries(issueCodes)" :key="c"><option :value="c" x-text="l"></option></template>
+      </select>
+      <input class="input !w-56 text-sm" placeholder="Search…" x-model.debounce.400ms="search" @input.debounce.400ms="page = 1; load()">
+      <div class="ml-auto inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5 text-sm">
+        <button class="rounded-md px-3 py-1.5 font-medium" :class="view === 'normalized' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600'" @click="view = 'normalized'">Normalized</button>
+        <button class="rounded-md px-3 py-1.5 font-medium" :class="view === 'original' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600'" @click="view = 'original'">Original</button>
+      </div>
+    </div>
+
+    <div class="overflow-x-auto max-h-[70vh]">
+      <table class="table min-w-max">
+        <thead>
+          <tr>
+            <th class="w-14">Row</th>
+            <template x-for="f in fields" :key="f.name">
+              <th>
+                <div class="flex items-center gap-1.5">
+                  <span x-text="f.name"></span>
+                  <span class="font-normal normal-case text-slate-400" x-text="f.type"></span>
+                  <button class="text-slate-300 hover:text-indigo-600" title="Reset manual edits in this column" @click="resetColumn(f.name)">↺</button>
+                </div>
+              </th>
+            </template>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <template x-for="r in rows" :key="r.index">
+            <tr>
+              <td class="tabular-nums text-slate-400" x-text="r.row_number"></td>
+              <template x-for="f in fields" :key="f.name">
+                <td class="!p-1">
+                  <div class="relative">
+                    <template x-if="editing && editing.row === r.index && editing.field === f.name">
+                      <input class="input !py-1 !px-2 text-sm min-w-[8rem]" x-model="editing.value" x-init="$nextTick(() => { $el.focus(); $el.select(); })" @keydown.enter="saveEdit()" @keydown.escape="editing = null" @blur="saveEdit()">
+                    </template>
+                    <template x-if="!(editing && editing.row === r.index && editing.field === f.name)">
+                      <button class="block w-full truncate max-w-[16rem] rounded-md px-2 py-1 text-left text-sm hover:bg-slate-100"
+                        :class="cellClass(r.cells[f.name])"
+                        @click="openCell($event, r, f.name)"
+                        @dblclick.prevent="startEdit(r, f.name)"
+                        :title="displayValue(r.cells[f.name]) ?? ''">
+                        <span x-show="displayValue(r.cells[f.name]) !== null" x-text="displayValue(r.cells[f.name])"></span>
+                        <span x-show="displayValue(r.cells[f.name]) === null" class="text-slate-300 italic">null</span>
+                      </button>
+                    </template>
+                  </div>
+                </td>
+              </template>
+              <td><span :class="MI.statusBadge(r.status)" x-text="r.status"></span></td>
+            </tr>
+          </template>
+          <tr x-show="!rows.length && !loading"><td :colspan="fields.length + 2" class="py-12 text-center text-slate-500">No rows match these filters.</td></tr>
+          <tr x-show="loading"><td :colspan="fields.length + 2" class="py-12 text-center text-slate-500"><span class="spinner"></span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 px-4 py-3 text-sm text-slate-600">
+      <span x-text="`${MI.fmt(total)} rows · page ${page} of ${pages}`"></span>
+      <div class="flex items-center gap-2">
+        <select class="select !w-auto text-xs" x-model.number="pageSize" @change="page = 1; load()"><option :value="25">25 / page</option><option :value="50">50 / page</option><option :value="100">100 / page</option><option :value="200">200 / page</option></select>
+        <button class="btn-secondary btn-sm" :disabled="page <= 1" @click="page--; load()">← Prev</button>
+        <button class="btn-secondary btn-sm" :disabled="page >= pages" @click="page++; load()">Next →</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- cell popover -->
+  <template x-if="popover">
+    <div class="fixed z-40 w-80 rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl fade-in" :style="`left:${popover.x}px; top:${popover.y}px`" @click.outside="if (!$event.target.closest('td')) popover = null">
+        <div class="flex items-start justify-between gap-2">
+          <div>
+            <p class="text-xs uppercase tracking-wide text-slate-500" x-text="`Row ${popover.row.row_number} · ${popover.field}`"></p>
+            <template x-if="popover.cell.issues.length">
+              <div class="mt-1 space-y-1">
+                <template x-for="iss in popover.cell.issues" :key="iss.code">
+                  <p class="text-sm font-semibold" :class="iss.severity === 'ERROR' ? 'text-rose-700' : 'text-amber-700'" x-text="iss.message"></p>
+                </template>
+              </div>
+            </template>
+            <p x-show="!popover.cell.issues.length" class="mt-1 text-sm font-semibold text-emerald-700">Looks good</p>
+          </div>
+          <button class="text-slate-400 hover:text-slate-700" @click="popover = null">✕</button>
+        </div>
+        <dl class="mt-3 space-y-2 text-sm">
+          <div><dt class="text-xs text-slate-500">Original</dt><dd class="font-mono break-all text-slate-800" x-text="popover.cell.original ?? '—'"></dd></div>
+          <div><dt class="text-xs text-slate-500">Normalized</dt><dd class="font-mono break-all text-slate-800" x-text="popover.cell.value ?? '—'"></dd></div>
+        </dl>
+        <div class="mt-4 flex flex-wrap gap-2">
+          <button class="btn-primary btn-sm" @click="startEdit(popover.row, popover.field); popover = null">Edit</button>
+          <button class="btn-secondary btn-sm" @click="setValue(popover.row, popover.field, null); popover = null">Set null</button>
+          <button class="btn-secondary btn-sm" x-show="popover.cell.original !== popover.cell.value" @click="setValue(popover.row, popover.field, popover.cell.original); popover = null">Use original</button>
+          <template x-if="popover.cell.issues.length && popover.cell.value">
+            <button class="btn-secondary btn-sm" @click="bulkFromCell()" title="Replace this value in every row of the column">Fix all rows with this value…</button>
+          </template>
+        </div>
+    </div>
+  </template>
+
+  <!-- template modal -->
+  <template x-if="templateModal">
+    <div class="fixed inset-0 z-40 grid place-items-center bg-slate-900/40 p-4" @click.self="templateModal = false">
+      <div class="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl fade-in">
+        <h3 class="text-lg font-semibold text-slate-900">Save mapping as template</h3>
+        <p class="mt-1 text-sm text-slate-600">Next time a file with these headers arrives, Magic Import will offer this mapping and transformation set.</p>
+        <label class="label mt-4">Template name</label>
+        <input class="input" placeholder="Acme CRM Customer Export" x-model="templateName" @keydown.enter="saveTemplate()">
+        <div class="mt-5 flex justify-end gap-2">
+          <button class="btn-secondary" @click="templateModal = false">Cancel</button>
+          <button class="btn-primary" :disabled="!templateName.trim()" @click="saveTemplate()">Save template</button>
+        </div>
+      </div>
+    </div>
+  </template>
+
+  <!-- bulk replace modal -->
+  <template x-if="bulkModal">
+    <div class="fixed inset-0 z-40 grid place-items-center bg-slate-900/40 p-4" @click.self="bulkModal = null">
+      <div class="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl fade-in">
+        <h3 class="text-lg font-semibold text-slate-900">Bulk fix</h3>
+        <p class="mt-1 text-sm text-slate-600">Replace <span class="kbd" x-text="bulkModal.from"></span> in <b x-text="bulkModal.field"></b> for every row.</p>
+        <label class="label mt-4">New value</label>
+        <input class="input" x-model="bulkModal.to" @keydown.enter="applyBulk({ type: 'replace', field: bulkModal.field, from_value: bulkModal.from, to_value: bulkModal.to }); bulkModal = null">
+        <div class="mt-5 flex justify-end gap-2">
+          <button class="btn-secondary" @click="bulkModal = null">Cancel</button>
+          <button class="btn-primary" @click="applyBulk({ type: 'replace', field: bulkModal.field, from_value: bulkModal.from, to_value: bulkModal.to }); bulkModal = null">Apply to all rows</button>
+        </div>
+      </div>
+    </div>
+  </template>
+</div>
+
+<script>
+function reviewStep() {
+  const params = new URLSearchParams(window.location.search);
+  return {
+    job: window.JOB, s: window.JOB.summary || {}, fields: window.SCHEMA.fields, issueCodes: {},
+    rows: [], total: 0, pages: 1, page: 1, pageSize: 50, loading: false, busy: false,
+    status: params.get('status') || '', field: params.get('field') || '', code: params.get('code') || '', search: '',
+    view: 'normalized', popover: null, editing: null, bulk: [], editLog: window.JOB.edit_log || [],
+    templateModal: false, templateName: '', bulkModal: null,
+    async init() {
+      const meta = await MI.api('GET', '/api/v1/meta'); this.issueCodes = meta.issue_codes;
+      await Promise.all([this.load(), this.loadBulk()]);
+    },
+    async load() {
+      this.loading = true;
+      const q = new URLSearchParams({ page: this.page, page_size: this.pageSize });
+      if (this.status) q.set('status', this.status);
+      if (this.field) q.set('field', this.field);
+      if (this.code) q.set('code', this.code);
+      if (this.search) q.set('search', this.search);
+      try { const d = await MI.api('GET', `/api/v1/imports/${this.job.id}/rows?${q}`); this.rows = d.rows; this.total = d.total; this.pages = d.pages; }
+      finally { this.loading = false; }
+    },
+    async loadBulk() { this.bulk = await MI.api('GET', `/api/v1/imports/${this.job.id}/bulk-fixes`); },
+    async refreshSummary() { const j = await MI.api('GET', `/api/v1/imports/${this.job.id}`); this.s = j.summary; this.editLog = j.edit_log; },
+    displayValue(cell) { if (!cell) return null; const v = this.view === 'original' ? cell.original : cell.value; return v === null || v === undefined ? null : v; },
+    cellClass(cell) {
+      if (!cell) return '';
+      if (cell.issues.some(i => i.severity === 'ERROR')) return 'cell-error';
+      if (cell.issues.length) return 'cell-warning';
+      if (cell.edited) return 'cell-edited';
+      return '';
+    },
+    openCell(ev, row, field) {
+      const rect = ev.currentTarget.getBoundingClientRect();
+      const x = Math.max(8, Math.min(rect.left, window.innerWidth - 340));
+      // below the cell when there is room, otherwise above it - never covering the cell
+      const y = rect.bottom + 6 + 290 <= window.innerHeight ? rect.bottom + 6 : Math.max(8, rect.top - 296);
+      this.popover = { row, field, cell: row.cells[field], x, y };
+    },
+    startEdit(row, field) { this.popover = null; this.editing = { row: row.index, field, value: row.cells[field].value ?? '' }; },
+    async saveEdit() {
+      if (!this.editing) return;
+      const e = this.editing; this.editing = null;
+      const row = this.rows.find(r => r.index === e.row);
+      if (row && (row.cells[e.field].value ?? '') === e.value) return;
+      await this.setValue(row, e.field, e.value === '' ? null : e.value);
+    },
+    async setValue(row, field, value) {
+      this.busy = true;
+      try {
+        const updated = await MI.api('PATCH', `/api/v1/imports/${this.job.id}/rows/${row.index}`, { field, value });
+        const i = this.rows.findIndex(r => r.index === row.index);
+        if (i >= 0) this.rows.splice(i, 1, updated);
+        await this.refreshSummary();
+        MI.toast(`Row ${updated.row_number} revalidated → ${updated.status}`, updated.status === 'error' ? 'info' : 'success', 2000);
+      } finally { this.busy = false; }
+    },
+    bulkFromCell() { this.bulkModal = { field: this.popover.field, from: this.popover.cell.value, to: '' }; this.popover = null; },
+    async applyBulk(b) {
+      this.busy = true;
+      try {
+        let res;
+        if (b.type === 'trim') res = await MI.api('POST', `/api/v1/imports/${this.job.id}/bulk-fixes/trim`, { field: b.field });
+        else res = await MI.api('POST', `/api/v1/imports/${this.job.id}/bulk-fixes/replace`, { field: b.field, from_value: b.from_value, to_value: b.to_value });
+        MI.toast(`Applied to ${res.detail.changed} rows`, 'success');
+        await Promise.all([this.load(), this.loadBulk(), this.refreshSummary()]);
+      } finally { this.busy = false; }
+    },
+    async undo() {
+      this.busy = true;
+      try { const r = await MI.api('POST', `/api/v1/imports/${this.job.id}/undo`); MI.toast(r.detail.undone ? `Undid: ${r.detail.undone}` : 'Nothing to undo'); await Promise.all([this.load(), this.loadBulk(), this.refreshSummary()]); }
+      finally { this.busy = false; }
+    },
+    async resetColumn(field) {
+      if (!confirm(`Drop all manual edits in "${field}"?`)) return;
+      const r = await MI.api('POST', `/api/v1/imports/${this.job.id}/reset-column`, { field });
+      MI.toast(`Reset ${r.detail.reset} cells in ${field}`); await Promise.all([this.load(), this.loadBulk(), this.refreshSummary()]);
+    },
+    async saveTemplate() {
+      if (!this.templateName.trim()) return;
+      await MI.api('POST', `/api/v1/imports/${this.job.id}/mapping/save-template`, { name: this.templateName.trim() });
+      this.templateModal = false; MI.toast(`Template "${this.templateName.trim()}" saved`, 'success');
+    },
+  };
+}
+</script>
