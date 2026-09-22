@@ -13,6 +13,7 @@ on:
     paths:
       - "demo-data/generate_demo_data.py"
       - "scripts/browser_demo.py"
+      - "scripts/build_frontend.sh"
       - "app/templates/**"
       - "app/static/**"
       - ".github/workflows/assets.yml"
