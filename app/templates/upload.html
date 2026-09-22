@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}New Import{% endblock %}
+{% block content %}
+{% set current = 1 %}
+{% include "partials/stepper.html" %}
+
+<div class="mx-auto max-w-3xl fade-in" x-data="uploader()">
+  <div class="text-center mb-8">
+    <h1 class="text-2xl font-semibold tracking-tight text-slate-900">Upload your spreadsheet</h1>
+    <p class="mt-2 text-slate-600">CSV or XLSX, up to {{ max_upload_mb }} MB. Delimiter and encoding are detected automatically.</p>
+  </div>
+
+  <div class="card card-pad">
+    <label
+      class="relative block cursor-pointer rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50/60 px-6 py-14 text-center transition hover:border-indigo-400 hover:bg-indigo-50/40"
+      :class="{ 'dropzone-active': dragging }"
+      @dragover.prevent="dragging = true" @dragleave.prevent="dragging = false" @drop.prevent="onDrop($event)">
+      <input type="file" class="sr-only" accept=".csv,.xlsx" @change="pick($event.target.files[0])" :disabled="busy">
+      <div class="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-white text-indigo-600 shadow-sm ring-1 ring-slate-200">
+        <svg class="h-7 w-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4m0 0l-4 4m4-4l4 4"/><path d="M4 16v3a1 1 0 001 1h14a1 1 0 001-1v-3"/></svg>
+      </div>
+      <p class="mt-4 text-lg font-medium text-slate-900">Drop your spreadsheet here</p>
+      <p class="mt-1 text-sm text-slate-500">CSV or XLSX · Maximum {{ max_upload_mb }} MB</p>
+      <span class="btn-secondary mt-5 inline-flex">Browse files</span>
+    </label>
+
+    <template x-if="file">
+      <div class="mt-5 flex items-center gap-4 rounded-xl border border-slate-200 bg-white p-4">
+        <span class="grid h-10 w-10 place-items-center rounded-xl bg-indigo-50 text-[11px] font-bold uppercase text-indigo-600" x-text="ext"></span>
+        <div class="min-w-0 flex-1">
+          <p class="truncate font-medium text-slate-900" x-text="file.name"></p>
+          <p class="text-xs text-slate-500" x-text="MI.bytes(file.size)"></p>
+        </div>
+        <template x-if="!busy">
+          <button class="btn-primary" @click="upload()">Upload &amp; analyze</button>
+        </template>
+        <template x-if="busy">
+          <span class="inline-flex items-center gap-2 text-sm text-slate-600"><span class="spinner"></span> Analyzing…</span>
+        </template>
+      </div>
+    </template>
+    <template x-if="error">
+      <div class="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800" x-text="error"></div>
+    </template>
+  </div>
+
+  <div class="mt-6 grid sm:grid-cols-3 gap-3 text-sm">
+    <div class="rounded-xl border border-slate-200 bg-white p-4"><p class="font-medium text-slate-900">Any delimiter</p><p class="mt-1 text-slate-500">Comma, semicolon, tab or pipe — with UTF-8, BOM and legacy encodings.</p></div>
+    <div class="rounded-xl border border-slate-200 bg-white p-4"><p class="font-medium text-slate-900">Multi-sheet XLSX</p><p class="mt-1 text-slate-500">Pick the sheet to import. Formulas and macros are never executed.</p></div>
+    <div class="rounded-xl border border-slate-200 bg-white p-4"><p class="font-medium text-slate-900">Private by default</p><p class="mt-1 text-slate-500">The raw upload is deleted right after parsing; only structured data is kept.</p></div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+function uploader() {
+  return {
+    file: null, dragging: false, busy: false, error: null,
+    get ext() { return (this.file?.name.split('.').pop() || '').toLowerCase(); },
+    onDrop(e) { this.dragging = false; const f = e.dataTransfer.files[0]; if (f) this.pick(f); },
+    pick(f) {
+      this.error = null;
+      if (!f) return;
+      const ext = f.name.split('.').pop().toLowerCase();
+      if (!['csv', 'xlsx'].includes(ext)) { this.error = 'Only CSV and XLSX files are supported.'; this.file = null; return; }
+      if (f.size > {{ max_upload_mb }} * 1024 * 1024) { this.error = 'File exceeds the {{ max_upload_mb }} MB limit.'; this.file = null; return; }
+      this.file = f;
+      this.upload();
+    },
+    async upload() {
+      if (!this.file || this.busy) return;
+      this.busy = true; this.error = null;
+      try {
+        const fd = new FormData();
+        fd.append('file', this.file);
+        const job = await MI.api('POST', '/api/v1/imports', fd, { silent: true });
+        window.location.href = `/imports/${job.id}`;
+      } catch (e) {
+        this.error = e.message; this.busy = false;
+      }
+    },
+  };
+}
+</script>
+{% endblock %}

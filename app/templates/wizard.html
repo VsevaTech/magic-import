@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}{{ job.name }} · {{ steps[current-1] }}{% endblock %}
+{% block content %}
+<div class="mb-6 flex flex-wrap items-start justify-between gap-4 fade-in">
+  <div class="min-w-0">
+    <div class="flex items-center gap-2 text-xs text-slate-500">
+      <a href="/imports" class="hover:text-slate-800">Imports</a><span>/</span>
+      <span class="truncate">{{ job.original_filename }}</span>
+    </div>
+    <h1 class="mt-1 text-2xl font-semibold tracking-tight text-slate-900 truncate">{{ job.name }}</h1>
+    <p class="mt-1 text-sm text-slate-600 flex flex-wrap gap-x-3 gap-y-1">
+      <span><b class="font-semibold text-slate-800">{{ "{:,}".format(job.row_count) }}</b> rows</span>
+      <span><b class="font-semibold text-slate-800">{{ job.column_count }}</b> columns</span>
+      {% if job.file_type == 'xlsx' %}<span><b class="font-semibold text-slate-800">{{ job.sheet_names|length }}</b> sheet{{ 's' if job.sheet_names|length != 1 }}{% if job.sheet_name %} · <span class="kbd">{{ job.sheet_name }}</span>{% endif %}</span>{% endif %}
+      <span>Encoding: <b class="font-semibold text-slate-800">{{ job.encoding }}</b></span>
+      {% if job.delimiter %}<span>Delimiter: <span class="kbd">{{ {',':'comma',';':'semicolon','\t':'tab','|':'pipe'}.get(job.delimiter, job.delimiter) }}</span></span>{% endif %}
+      {% if job.schema_name %}<span>Schema: <b class="font-semibold text-slate-800">{{ job.schema_name }}</b></span>{% endif %}
+    </p>
+  </div>
+  <div class="flex items-center gap-2">
+    <span class="{{ {'completed':'badge badge-high','validated':'badge badge-info','mapped':'badge badge-info','mapping':'badge badge-medium','uploaded':'badge badge-muted'}[job.status] }} !text-xs !px-2.5 !py-1">{{ {'completed':'Completed','validated':'Needs Review','mapped':'Ready to validate','mapping':'Mapping','uploaded':'Uploaded'}[job.status] }}</span>
+  </div>
+</div>
+
+{% include "partials/stepper.html" %}
+
+<script>
+  window.JOB = {{ job|tojson }};
+  window.SCHEMA = {{ schema|tojson }};
+  window.SCHEMAS = {{ schemas|tojson }};
+  window.KIND_LABELS = {{ kind_labels|tojson }};
+  window.AI_AVAILABLE = {{ 'true' if ai_available else 'false' }};
+</script>
+
+<div class="fade-in">
+  {% if current == 2 %}{% include "steps/inspect.html" %}
+  {% elif current == 3 %}{% include "steps/map.html" %}
+  {% elif current == 4 %}{% include "steps/transform.html" %}
+  {% elif current == 5 %}{% include "steps/validate.html" %}
+  {% elif current == 6 %}{% include "steps/review.html" %}
+  {% elif current == 7 %}{% include "steps/export.html" %}
+  {% endif %}
+</div>
+{% endblock %}

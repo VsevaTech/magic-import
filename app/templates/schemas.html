@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Schemas{% endblock %}
+{% block content %}
+<div class="flex flex-wrap items-end justify-between gap-4 mb-6 fade-in">
+  <div>
+    <h1 class="text-2xl font-semibold tracking-tight text-slate-900">Import Schemas</h1>
+    <p class="mt-1 text-slate-600">A schema is the data contract your system expects: fields, types, required/unique flags, aliases and validation rules.</p>
+  </div>
+  <a href="/schemas/new" class="btn-primary">+ New schema</a>
+</div>
+
+<div class="grid md:grid-cols-2 xl:grid-cols-3 gap-5 fade-in" x-data="{ async remove(id, el) { if (!confirm('Delete this schema? Imports that used it keep their data.')) return; await MI.api('DELETE', `/api/v1/schemas/${id}`); el.remove(); MI.toast('Schema deleted', 'success'); } }">
+  {% for s in schemas %}
+  <div class="card card-pad flex flex-col">
+    <div class="flex items-start justify-between gap-2">
+      <div>
+        <h2 class="font-semibold text-slate-900">{{ s.name }}</h2>
+        <p class="mt-0.5 text-sm text-slate-500">{{ s.description or 'No description' }}</p>
+      </div>
+      {% if s.is_builtin %}<span class="badge badge-info shrink-0">built-in</span>{% endif %}
+    </div>
+    <ul class="mt-4 space-y-1 text-sm flex-1">
+      {% for f in s.fields[:6] %}
+      <li class="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-2.5 py-1.5">
+        <span class="font-mono text-xs text-slate-800">{{ f.name }}</span>
+        <span class="flex items-center gap-1 text-[11px] text-slate-500">
+          <span class="badge badge-muted">{{ f.type }}</span>
+          {% if f.required %}<span class="badge badge-error">req</span>{% endif %}
+          {% if f.unique %}<span class="badge badge-medium">uniq</span>{% endif %}
+        </span>
+      </li>
+      {% endfor %}
+      {% if s.fields|length > 6 %}<li class="px-2.5 text-xs text-slate-400">+ {{ s.fields|length - 6 }} more</li>{% endif %}
+    </ul>
+    <div class="mt-4 flex items-center justify-between text-sm">
+      <span class="text-slate-500">{{ s.fields|length }} fields · v{{ s.version }}</span>
+      <div class="flex gap-1">
+        <button class="btn-ghost btn-sm text-rose-600" @click="remove('{{ s.id }}', $el.closest('.card'))">Delete</button>
+        <a href="/schemas/{{ s.id }}" class="btn-secondary btn-sm">Edit</a>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<section class="mt-10 fade-in" x-data="{ async remove(id, el) { if (!confirm('Delete this mapping template?')) return; await MI.api('DELETE', `/api/v1/templates/${id}`); el.remove(); } }">
+  <h2 class="text-lg font-semibold text-slate-900">Mapping templates</h2>
+  <p class="mt-1 text-sm text-slate-600">Saved from the review step. Detected automatically when a file with matching headers is uploaded.</p>
+  <div class="mt-4 card overflow-hidden">
+    {% if mapping_templates %}
+    <table class="table">
+      <thead><tr><th>Template</th><th>Schema</th><th>Headers</th><th class="text-right">Used</th><th></th></tr></thead>
+      <tbody>
+        {% for t in mapping_templates %}
+        <tr>
+          <td class="font-medium text-slate-900">{{ t.name }}</td>
+          <td class="text-slate-600">{% for s in schemas if s.id == t.schema_id %}{{ s.name }}{% endfor %}</td>
+          <td class="text-xs text-slate-500">{{ t.columns|join(', ') }}</td>
+          <td class="text-right tabular-nums">{{ t.use_count }}</td>
+          <td class="text-right"><button class="btn-ghost btn-sm text-rose-600" @click="remove('{{ t.id }}', $el.closest('tr'))">Delete</button></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="p-8 text-center text-sm text-slate-500">No templates yet. Confirm a mapping, then choose <b>Save mapping template</b> in the review step.</div>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}
