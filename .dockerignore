@@ -10,3 +10,4 @@ docs
 tests
 scripts
 .env
+.frontend-build

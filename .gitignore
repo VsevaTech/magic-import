@@ -24,3 +24,4 @@ node_modules/
 .vscode/
 docs/demo-exports/
 .python-version
+.frontend-build/
