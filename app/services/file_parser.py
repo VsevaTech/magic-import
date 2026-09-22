@@ -51,7 +51,7 @@ def _cell_to_str(value) -> str | None:
     if value is None:
         return None
     if isinstance(value, str):
-        s = value.strip("\\ufeff")
+        s = value.strip("﻿")
         return s if s != "" else None
     if isinstance(value, bool):
         return "true" if value else "false"
@@ -151,7 +151,7 @@ def parse_csv(data: bytes) -> ParsedFile:
     except (UnicodeDecodeError, LookupError):
         encoding = "latin-1"
         text = data.decode("latin-1", errors="replace")
-    text = text.lstrip("\\ufeff")
+    text = text.lstrip("﻿")
     if "\x00" in text[:4096]:
         raise InvalidFileError("The file does not look like a text CSV file.")
     delimiter = detect_delimiter(text[:20_000])
