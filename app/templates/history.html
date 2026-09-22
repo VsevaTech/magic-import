@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Imports{% endblock %}
+{% block content %}
+<div class="flex flex-wrap items-end justify-between gap-4 mb-6 fade-in">
+  <div>
+    <h1 class="text-2xl font-semibold tracking-tight text-slate-900">Import History</h1>
+    <p class="mt-1 text-slate-600">Every import keeps its schema, mapping, transformations, summary and issues. Raw files are deleted after parsing.</p>
+  </div>
+  <a href="/imports/new" class="btn-primary">New Import</a>
+</div>
+<div class="card overflow-hidden fade-in" x-data="{ async remove(id, el) { if (!confirm('Delete this import and all its data?')) return; await MI.api('DELETE', `/api/v1/imports/${id}`); el.closest('tr').remove(); MI.toast('Import deleted', 'success'); } }">
+  {% if jobs %}
+  <div class="overflow-x-auto">
+  <table class="table">
+    <thead><tr><th>Import</th><th>File</th><th>Schema</th><th class="text-right">Rows</th><th class="text-right">Ready</th><th>Status</th><th>Date</th><th></th></tr></thead>
+    <tbody>
+      {% for j in jobs %}
+      <tr>
+        <td><a href="/imports/{{ j.id }}" class="font-medium text-slate-900 hover:text-indigo-600">{{ j.name }}</a></td>
+        <td class="text-slate-600"><span class="badge badge-muted mr-1">{{ j.file_type }}</span>{{ j.original_filename }}</td>
+        <td class="text-slate-600">{{ j.schema_name or '—' }}</td>
+        <td class="text-right tabular-nums">{{ "{:,}".format(j.row_count) }}</td>
+        <td class="text-right tabular-nums">{% if j.summary.ready_pct is defined %}<span class="font-medium {{ 'text-emerald-600' if j.summary.ready_pct >= 95 else 'text-amber-600' }}">{{ j.summary.ready_pct }}%</span>{% else %}—{% endif %}</td>
+        <td><span class="{{ {'completed':'badge badge-high','validated':'badge badge-info','mapped':'badge badge-info','mapping':'badge badge-medium','uploaded':'badge badge-muted'}[j.status] }}">{{ {'completed':'Completed','validated':'Needs Review','mapped':'Ready to validate','mapping':'Mapping','uploaded':'Uploaded'}[j.status] }}</span></td>
+        <td class="text-slate-500 whitespace-nowrap">{{ j.created_at[:10] }}</td>
+        <td class="text-right"><button class="btn-ghost btn-sm text-rose-600" @click="remove('{{ j.id }}', $el)">Delete</button></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <div class="p-12 text-center text-slate-500">No imports yet. <a class="text-indigo-600" href="/imports/new">Start one →</a></div>
+  {% endif %}
+</div>
+{% endblock %}

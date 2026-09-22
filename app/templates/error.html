@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}Error {{ status }}{% endblock %}
+{% block content %}
+<div class="mx-auto max-w-lg text-center py-16 fade-in">
+  <p class="text-6xl font-semibold tracking-tight text-slate-200">{{ status }}</p>
+  <h1 class="mt-2 text-xl font-semibold text-slate-900">{{ 'Page not found' if status == 404 else 'Something went wrong' }}</h1>
+  <p class="mt-2 text-slate-600">{{ message }}</p>
+  <a href="/" class="btn-primary mt-6">Back to dashboard</a>
+</div>
+{% endblock %}

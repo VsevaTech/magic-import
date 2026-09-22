@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-slate-50">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{{ app_name }}{% endblock %} · Magic Import</title>
+  <meta name="description" content="Turn any spreadsheet into the data shape your system expects.">
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/app.css">
+  <script defer src="/static/vendor/alpine.min.js"></script>
+  <script src="/static/app.js"></script>
+  {% block head %}{% endblock %}
+</head>
+<body class="h-full text-slate-800 antialiased" x-data="{ mobileNav: false }">
+  <div class="min-h-full flex flex-col">
+    <header class="sticky top-0 z-30 border-b border-slate-200/80 bg-white/90 backdrop-blur">
+      <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+        <div class="flex h-16 items-center justify-between gap-4">
+          <a href="/" class="flex items-center gap-2.5 shrink-0">
+            <span class="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-indigo-500 via-violet-500 to-fuchsia-500 text-white shadow-md shadow-indigo-500/30">
+              <svg viewBox="0 0 24 24" class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v16H4z"/><path d="M4 10h16M10 4v16"/><path d="M15 13l1.2 2.3L18.5 16l-2.3 1.2L15 19.5l-1.2-2.3L11.5 16l2.3-.7z" fill="currentColor" stroke="none"/></svg>
+            </span>
+            <span class="text-lg font-semibold tracking-tight text-slate-900">Magic Import</span>
+          </a>
+          <nav class="hidden md:flex items-center gap-1 text-sm font-medium">
+            {% set nav = [("dashboard","/","Dashboard"),("imports","/imports","Imports"),("schemas","/schemas","Schemas")] %}
+            {% for key, href, label in nav %}
+            <a href="{{ href }}" class="rounded-lg px-3 py-2 transition {{ 'bg-slate-100 text-slate-900' if active == key else 'text-slate-600 hover:bg-slate-100 hover:text-slate-900' }}">{{ label }}</a>
+            {% endfor %}
+            <a href="/docs" target="_blank" rel="noopener" class="rounded-lg px-3 py-2 text-slate-600 hover:bg-slate-100 hover:text-slate-900">API</a>
+          </nav>
+          <div class="flex items-center gap-2">
+            <a href="/imports/new" class="btn-primary hidden sm:inline-flex">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+              New Import
+            </a>
+            <button class="md:hidden btn-ghost p-2" @click="mobileNav = !mobileNav" aria-label="Menu">
+              <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+            </button>
+          </div>
+        </div>
+        <div x-show="mobileNav" x-cloak class="md:hidden border-t border-slate-200 py-2 text-sm font-medium">
+          <a href="/" class="block rounded-lg px-3 py-2 hover:bg-slate-100">Dashboard</a>
+          <a href="/imports" class="block rounded-lg px-3 py-2 hover:bg-slate-100">Imports</a>
+          <a href="/schemas" class="block rounded-lg px-3 py-2 hover:bg-slate-100">Schemas</a>
+          <a href="/docs" class="block rounded-lg px-3 py-2 hover:bg-slate-100">API</a>
+          <a href="/imports/new" class="block rounded-lg px-3 py-2 text-indigo-600 hover:bg-indigo-50">+ New Import</a>
+        </div>
+      </div>
+    </header>
+
+    <main class="flex-1">
+      <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
+        {% block content %}{% endblock %}
+      </div>
+    </main>
+
+    <footer class="border-t border-slate-200 bg-white/60">
+      <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-5 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-slate-500">
+        <span>Magic Import v{{ app_version }} · Turn any spreadsheet into the data shape your system expects.</span>
+        <span class="flex items-center gap-3">
+          <a href="/docs" class="hover:text-slate-800">OpenAPI</a>
+          <a href="https://github.com/VsevaTech/magic-import" class="hover:text-slate-800">GitHub</a>
+          <span class="inline-flex items-center gap-1.5">
+            <span class="h-1.5 w-1.5 rounded-full {{ 'bg-emerald-500' if ai_available else 'bg-slate-300' }}"></span>
+            AI mapping {{ 'available' if ai_available else 'off (no API key)' }}
+          </span>
+        </span>
+      </div>
+    </footer>
+  </div>
+
+  <!-- toasts -->
+  <div id="toasts" class="fixed bottom-4 right-4 z-50 flex flex-col gap-2 w-[min(92vw,22rem)]"></div>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

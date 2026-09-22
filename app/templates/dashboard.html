@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<section class="fade-in">
+  <div class="relative overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+    <div class="absolute inset-0 bg-[radial-gradient(ellipse_at_top_left,rgba(99,102,241,0.14),transparent_55%),radial-gradient(ellipse_at_bottom_right,rgba(217,70,239,0.12),transparent_55%)]"></div>
+    <div class="relative px-6 py-10 sm:px-10 sm:py-14 grid lg:grid-cols-5 gap-10 items-center">
+      <div class="lg:col-span-3">
+        <span class="badge badge-info mb-4">Smart CSV / XLSX importer</span>
+        <h1 class="text-3xl sm:text-4xl font-semibold tracking-tight text-slate-900">Smart spreadsheet imports <span class="bg-gradient-to-r from-indigo-600 via-violet-600 to-fuchsia-600 bg-clip-text text-transparent">without spreadsheet cleanup.</span></h1>
+        <p class="mt-4 max-w-xl text-slate-600 leading-relaxed">Upload any customer file, let Magic Import understand its columns, map them onto your schema, normalize phones, countries and dates, fix what's left — and export import-ready data.</p>
+        <div class="mt-7 flex flex-wrap gap-3">
+          <a href="/imports/new" class="btn-primary px-5 py-2.5 text-base">
+            <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4m0 0l-4 4m4-4l4 4"/><path d="M4 16v3a1 1 0 001 1h14a1 1 0 001-1v-3"/></svg>
+            New Import
+          </a>
+          <a href="/schemas" class="btn-secondary px-5 py-2.5 text-base">Manage Schemas</a>
+        </div>
+      </div>
+      <div class="lg:col-span-2">
+        <ol class="grid grid-cols-2 gap-2 text-sm">
+          {% for s in steps %}
+          <li class="flex items-center gap-2.5 rounded-xl border border-slate-200/80 bg-white/80 px-3 py-2.5 backdrop-blur">
+            <span class="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-indigo-600 text-[11px] font-bold text-white">{{ loop.index }}</span>
+            <span class="font-medium text-slate-700">{{ s }}</span>
+          </li>
+          {% endfor %}
+          <li class="flex items-center gap-2.5 rounded-xl border border-dashed border-slate-300 px-3 py-2.5 text-slate-500">
+            <span class="h-6 w-6 shrink-0 grid place-items-center rounded-full bg-slate-100 text-[11px] font-bold">✓</span>
+            Clean, import-ready data
+          </li>
+        </ol>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="mt-8 grid grid-cols-2 lg:grid-cols-5 gap-4 fade-in">
+  <div class="stat"><div class="stat-label">Imports</div><div class="stat-value mt-1">{{ "{:,}".format(stats.imports) }}</div></div>
+  <div class="stat"><div class="stat-label">Rows processed</div><div class="stat-value mt-1">{{ "{:,}".format(stats.rows) }}</div></div>
+  <div class="stat"><div class="stat-label">Completed</div><div class="stat-value mt-1 text-emerald-600">{{ stats.completed }}</div></div>
+  <div class="stat"><div class="stat-label">Needs review</div><div class="stat-value mt-1 text-amber-600">{{ stats.needs_review }}</div></div>
+  <div class="stat"><div class="stat-label">Schemas</div><div class="stat-value mt-1">{{ stats.schemas }}</div></div>
+</section>
+
+<section class="mt-8 grid lg:grid-cols-3 gap-6 fade-in">
+  <div class="lg:col-span-2 card">
+    <div class="flex items-center justify-between px-6 pt-5 pb-3">
+      <h2 class="text-base font-semibold text-slate-900">Recent Imports</h2>
+      <a href="/imports" class="text-sm font-medium text-indigo-600 hover:text-indigo-500">View all →</a>
+    </div>
+    {% if jobs %}
+    <ul class="divide-y divide-slate-100">
+      {% for j in jobs %}
+      <li>
+        <a href="/imports/{{ j.id }}" class="flex items-center gap-4 px-6 py-4 hover:bg-slate-50 transition">
+          <span class="grid h-10 w-10 shrink-0 place-items-center rounded-xl {{ 'bg-emerald-50 text-emerald-600' if j.file_type == 'xlsx' else 'bg-sky-50 text-sky-600' }} text-[11px] font-bold uppercase">{{ j.file_type }}</span>
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-2">
+              <p class="truncate font-medium text-slate-900">{{ j.name }}</p>
+              <span class="{{ {'completed':'badge badge-high','validated':'badge badge-info','mapped':'badge badge-info','mapping':'badge badge-medium','uploaded':'badge badge-muted'}[j.status] }}">
+                {{ {'completed':'Completed','validated':'Needs Review','mapped':'Ready to validate','mapping':'Mapping','uploaded':'Uploaded'}[j.status] }}
+              </span>
+            </div>
+            <p class="mt-0.5 truncate text-sm text-slate-500">{{ j.original_filename }} · {{ "{:,}".format(j.row_count) }} rows · {{ j.column_count }} columns{% if j.schema_name %} · {{ j.schema_name }}{% endif %}</p>
+          </div>
+          <div class="hidden sm:block text-right shrink-0">
+            {% if j.summary.ready_pct is defined %}
+            <p class="text-sm font-semibold {{ 'text-emerald-600' if j.summary.ready_pct >= 95 else 'text-amber-600' }}">{{ j.summary.ready_pct }}% ready</p>
+            <p class="text-xs text-slate-500">{{ j.summary.error }} errors · {{ j.summary.warning }} warnings</p>
+            {% else %}
+            <p class="text-xs text-slate-400">{{ j.created_at[:10] }}</p>
+            {% endif %}
+          </div>
+          <svg class="h-4 w-4 text-slate-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg>
+        </a>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <div class="px-6 pb-8 pt-4 text-center">
+      <div class="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-slate-100 text-slate-400">
+        <svg class="h-7 w-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4 4h16v16H4z"/><path d="M4 10h16M10 4v16"/></svg>
+      </div>
+      <p class="mt-4 font-medium text-slate-900">No imports yet</p>
+      <p class="mt-1 text-sm text-slate-500">Drop your first spreadsheet and watch it turn into clean data. Try the files in <span class="kbd">demo-data/</span>.</p>
+      <a href="/imports/new" class="btn-primary mt-5">Start your first import</a>
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="card card-pad">
+    <div class="flex items-center justify-between">
+      <h2 class="text-base font-semibold text-slate-900">Import Schemas</h2>
+      <a href="/schemas/new" class="text-sm font-medium text-indigo-600 hover:text-indigo-500">+ New</a>
+    </div>
+    <ul class="mt-4 space-y-2">
+      {% for s in schemas %}
+      <li>
+        <a href="/schemas/{{ s.id }}" class="flex items-center justify-between rounded-xl border border-slate-200 px-4 py-3 hover:border-indigo-300 hover:bg-indigo-50/40 transition">
+          <div>
+            <p class="font-medium text-slate-900">{{ s.name }}</p>
+            <p class="text-xs text-slate-500">{{ s.fields|length }} fields{% if s.is_builtin %} · built-in{% endif %}</p>
+          </div>
+          <span class="text-slate-300">›</span>
+        </a>
+      </li>
+      {% endfor %}
+    </ul>
+    <div class="mt-5 rounded-xl bg-slate-50 p-4 text-sm text-slate-600">
+      <p class="font-medium text-slate-800">REST API included</p>
+      <p class="mt-1">Everything in this UI is available at <a class="text-indigo-600 hover:underline" href="/docs">/docs</a> — upload, map, validate and export programmatically.</p>
+    </div>
+  </div>
+</section>
+{% endblock %}
