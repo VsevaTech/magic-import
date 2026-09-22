@@ -1,0 +1,139 @@
+{# STEP 3 — Map source columns to target fields #}
+<div x-data="mapStep()" x-init="load()">
+  <div class="mb-5 flex flex-wrap items-start justify-between gap-4">
+    <div>
+      <h2 class="text-lg font-semibold text-slate-900">Map columns to <span class="text-indigo-600">{{ schema.name }}</span></h2>
+      <p class="mt-1 text-sm text-slate-600">Suggestions come from saved mappings, exact/normalized names, aliases and fuzzy matching. <span class="badge badge-low">Low</span> suggestions need your confirmation.</p>
+    </div>
+    <div class="flex flex-wrap gap-2 text-xs">
+      <span class="badge badge-high" x-text="`${count('HIGH')} high`"></span>
+      <span class="badge badge-medium" x-text="`${count('MEDIUM')} medium`"></span>
+      <span class="badge badge-low" x-text="`${count('LOW')} low`"></span>
+      <span class="badge badge-muted" x-text="`${count('UNMAPPED')} unmapped`"></span>
+    </div>
+  </div>
+
+  <template x-if="templateSuggestion">
+    <div class="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-indigo-200 bg-indigo-50/70 px-5 py-4">
+      <div class="flex items-center gap-3">
+        <span class="grid h-9 w-9 place-items-center rounded-xl bg-white text-indigo-600 shadow-sm"><svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 4.2L18 9l-4.2 1.8L12 15l-1.8-4.2L6 9l4.2-1.8z"/><path d="M19 16l.9 2.1L22 19l-2.1.9L19 22l-.9-2.1L16 19l2.1-.9z"/></svg></span>
+        <div>
+          <p class="text-sm font-semibold text-indigo-900">Template detected: <span x-text="templateSuggestion.name"></span></p>
+          <p class="text-xs text-indigo-700" x-text="`${Math.round(templateSuggestion.match * 100)}% of headers match a mapping you saved earlier.`"></p>
+        </div>
+      </div>
+      <div class="flex gap-2">
+        <button class="btn-ghost btn-sm" @click="templateSuggestion = null">Dismiss</button>
+        <button class="btn-primary btn-sm" @click="applyTemplate()">Apply template</button>
+      </div>
+    </div>
+  </template>
+
+  <template x-if="conflicts.length">
+    <div class="mb-5 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-800">
+      <p class="font-semibold">Mapping conflict</p>
+      <template x-for="c in conflicts" :key="c.target_field">
+        <p class="mt-1">Target <span class="kbd" x-text="c.target_field"></span> is mapped from several columns: <span x-text="c.sources.join(', ')"></span>. Choose one or ignore the others.</p>
+      </template>
+    </div>
+  </template>
+
+  <div class="grid lg:grid-cols-3 gap-6">
+    <div class="lg:col-span-2 card overflow-hidden">
+      <div class="overflow-x-auto">
+      <table class="table">
+        <thead><tr><th>Source column</th><th class="w-6"></th><th>Target field</th><th>Confidence</th><th class="text-right">Ignore</th></tr></thead>
+        <tbody>
+          <template x-for="m in mapping" :key="m.source_column">
+            <tr :class="m.ignored && 'opacity-60'">
+              <td>
+                <p class="font-medium text-slate-900" x-text="m.source_column"></p>
+                <p class="mt-0.5 flex flex-wrap gap-x-2 text-xs text-slate-500">
+                  <span class="badge badge-muted" x-text="m.detected_type === 'country_code' ? 'country' : m.detected_type"></span>
+                  <template x-for="ex in m.examples"><span class="font-mono truncate max-w-[9rem]" x-text="ex" :title="ex"></span></template>
+                </p>
+              </td>
+              <td class="text-slate-300 text-center">→</td>
+              <td>
+                <select class="select min-w-[11rem]" :value="m.ignored ? '' : (m.target_field || '')" @change="setTarget(m, $event.target.value)" :disabled="busy">
+                  <option value="">— not mapped —</option>
+                  <template x-for="f in fields" :key="f.name">
+                    <option :value="f.name" :selected="!m.ignored && m.target_field === f.name" x-text="`${f.name} (${f.type})${f.required ? ' *' : ''}`"></option>
+                  </template>
+                </select>
+              </td>
+              <td>
+                <span :class="MI.confBadge(m.confidence)" x-text="m.confidence"></span>
+                <span class="ml-1 text-[11px] text-slate-400" x-text="methodLabel(m)"></span>
+              </td>
+              <td class="text-right">
+                <input type="checkbox" class="h-4 w-4 accent-indigo-600" :checked="m.ignored" @change="toggleIgnore(m, $event.target.checked)" :disabled="busy" title="Ignore column">
+              </td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+      </div>
+    </div>
+
+    <aside class="space-y-5">
+      <div class="card card-pad">
+        <h3 class="text-sm font-semibold text-slate-900">Target fields</h3>
+        <ul class="mt-3 space-y-1.5 text-sm">
+          <template x-for="f in fields" :key="f.name">
+            <li class="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5" :class="mappedTargets.has(f.name) ? 'bg-emerald-50/60' : (f.required ? 'bg-rose-50/60' : 'bg-slate-50')">
+              <span class="min-w-0">
+                <span class="font-medium text-slate-800" x-text="f.name"></span>
+                <span class="text-xs text-slate-500" x-text="` · ${f.type}${f.required ? ' · required' : ''}${f.unique ? ' · unique' : ''}`"></span>
+              </span>
+              <span class="shrink-0 text-xs" :class="mappedTargets.has(f.name) ? 'text-emerald-600' : (f.required ? 'text-rose-600' : 'text-slate-400')" x-text="mappedTargets.has(f.name) ? 'mapped' : (f.required ? 'missing' : 'optional')"></span>
+            </li>
+          </template>
+        </ul>
+        <template x-if="missingRequired.length">
+          <p class="mt-3 text-xs text-rose-700">Required fields without a source: <b x-text="missingRequired.join(', ')"></b>. You can still continue — set a default in the next step or fix the file.</p>
+        </template>
+      </div>
+      <div class="card card-pad">
+        <button class="btn-primary w-full py-2.5" :disabled="busy || conflicts.length > 0" @click="confirm()">
+          <span x-show="!busy">Confirm mapping →</span>
+          <span x-show="busy" class="inline-flex items-center gap-2"><span class="spinner !border-white/40 !border-t-white"></span> Saving…</span>
+        </button>
+        <p class="mt-2 text-xs text-slate-500">Confirmed pairs are remembered and reused for future imports into this schema.</p>
+        <button class="btn-secondary mt-3 w-full" @click="rerun()" :disabled="busy">Re-run auto mapping</button>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<script>
+function mapStep() {
+  return {
+    mapping: [], conflicts: [], templateSuggestion: null, fields: window.SCHEMA.fields, busy: false,
+    get mappedTargets() { return new Set(this.mapping.filter(m => !m.ignored && m.target_field).map(m => m.target_field)); },
+    get missingRequired() { const t = this.mappedTargets; return this.fields.filter(f => f.required && !t.has(f.name) && !f.default).map(f => f.name); },
+    count(c) { return this.mapping.filter(m => m.confidence === c).length; },
+    methodLabel(m) { return ({ saved: 'remembered', exact: 'exact', normalized: 'normalized', alias: 'alias', fuzzy: 'fuzzy', type: 'by type', ai: 'AI', template: 'template', manual: 'manual' })[m.method] || ''; },
+    apply(data) { this.mapping = data.mapping; this.conflicts = data.conflicts || []; if (data.template_suggestion) this.templateSuggestion = data.template_suggestion; },
+    async load() { this.apply(await MI.api('GET', `/api/v1/imports/${window.JOB.id}/mapping`)); },
+    async setTarget(m, value) {
+      const payload = {}; payload[m.source_column] = value || null;
+      this.busy = true;
+      try { this.apply(await MI.api('POST', `/api/v1/imports/${window.JOB.id}/mapping`, { mapping: payload, confirm: false })); }
+      catch (e) { if (e.code === 'invalid_mapping') { this.conflicts = e.details || []; } await this.load(); }
+      finally { this.busy = false; }
+    },
+    async toggleIgnore(m, ignored) { await this.setTarget(m, ignored ? '' : (m.target_field || '')); if (!ignored && !m.target_field) MI.toast('Choose a target field for this column.'); },
+    async confirm() {
+      this.busy = true;
+      try {
+        const payload = {}; this.mapping.forEach(m => payload[m.source_column] = m.ignored ? null : (m.target_field || null));
+        await MI.api('POST', `/api/v1/imports/${window.JOB.id}/mapping`, { mapping: payload, confirm: true });
+        window.location.href = `/imports/${window.JOB.id}?step=4`;
+      } catch (e) { this.busy = false; }
+    },
+    async applyTemplate() { this.busy = true; try { this.apply(await MI.api('POST', `/api/v1/imports/${window.JOB.id}/mapping/apply-template`, { template_id: this.templateSuggestion.id })); this.templateSuggestion = null; MI.toast('Template applied', 'success'); } finally { this.busy = false; } },
+    async rerun() { this.busy = true; try { this.apply(await MI.api('POST', `/api/v1/imports/${window.JOB.id}/schema`, { schema_id: window.JOB.schema_id, ai_enabled: window.JOB.ai_enabled })); } finally { this.busy = false; } },
+  };
+}
+</script>

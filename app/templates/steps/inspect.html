@@ -1,0 +1,110 @@
+{# STEP 2 — Inspect: file profile + target schema selection #}
+<div x-data="inspectStep()" class="grid lg:grid-cols-3 gap-6">
+  <div class="lg:col-span-2 space-y-6">
+    {% if job.sheet_names|length > 1 %}
+    <div class="card card-pad">
+      <h2 class="text-base font-semibold text-slate-900">Choose a sheet</h2>
+      <p class="mt-1 text-sm text-slate-600">This workbook has {{ job.sheet_names|length }} sheets. The selected sheet is analyzed below.</p>
+      <div class="mt-4 flex flex-wrap gap-2">
+        {% for s in job.sheet_names %}
+        <button class="btn-secondary {{ 'ring-2 ring-indigo-500 border-indigo-500 text-indigo-700' if s == job.sheet_name }}" @click="selectSheet({{ s|tojson_attr }})" :disabled="busy">
+          <svg class="h-4 w-4 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h16v14H4z"/><path d="M4 10h16M9 5v14"/></svg>{{ s }}
+        </button>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="card">
+      <div class="flex items-center justify-between px-6 pt-5 pb-3">
+        <div>
+          <h2 class="text-base font-semibold text-slate-900">File inspection</h2>
+          <p class="text-sm text-slate-600">Detected types, emptiness and uniqueness per column.</p>
+        </div>
+        <div class="flex gap-2 text-xs">
+          {% set empties = job.inspection.values()|selectattr('is_empty')|list|length %}
+          {% set dups = job.inspection.values()|selectattr('is_duplicate_header')|list|length %}
+          {% if empties %}<span class="badge badge-medium">{{ empties }} empty column{{ 's' if empties != 1 }}</span>{% endif %}
+          {% if dups %}<span class="badge badge-error">{{ dups }} duplicate header{{ 's' if dups != 1 }}</span>{% endif %}
+        </div>
+      </div>
+      <div class="grid sm:grid-cols-2 gap-3 px-6 pb-6">
+        {% for col in job.columns %}{% set p = job.inspection[col] %}
+        <div class="rounded-xl border {{ 'border-amber-200 bg-amber-50/40' if p.is_empty else ('border-rose-200 bg-rose-50/40' if p.is_duplicate_header else 'border-slate-200') }} p-4">
+          <div class="flex items-start justify-between gap-2">
+            <p class="font-medium text-slate-900 truncate" title="{{ col }}">{{ col }}</p>
+            <span class="badge badge-muted shrink-0">{{ {'country_code':'country','empty':'empty'}.get(p.detected_type, p.detected_type) }}</span>
+          </div>
+          <dl class="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-500">
+            <div><dt class="uppercase tracking-wide">Empty</dt><dd class="mt-0.5 text-sm font-semibold {{ 'text-amber-600' if p.empty_pct > 20 else 'text-slate-800' }}">{{ p.empty_pct }}%</dd></div>
+            <div><dt class="uppercase tracking-wide">Unique</dt><dd class="mt-0.5 text-sm font-semibold text-slate-800">{{ p.unique_pct }}%</dd></div>
+          </dl>
+          {% if p.examples %}
+          <div class="mt-3 space-y-1">
+            {% for ex in p.examples[:3] %}<p class="truncate font-mono text-xs text-slate-600" title="{{ ex }}">{{ ex }}</p>{% endfor %}
+          </div>
+          {% else %}<p class="mt-3 text-xs italic text-slate-400">No values</p>{% endif %}
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <aside class="space-y-6">
+    <div class="card card-pad lg:sticky lg:top-24">
+      <h2 class="text-base font-semibold text-slate-900">Import into</h2>
+      <p class="mt-1 text-sm text-slate-600">Pick the target schema. Magic Import will suggest a mapping for every column.</p>
+      <div class="mt-4 space-y-2">
+        <template x-for="s in schemas" :key="s.id">
+          <label class="flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition" :class="schemaId === s.id ? 'border-indigo-500 bg-indigo-50/60 ring-2 ring-indigo-500/20' : 'border-slate-200 hover:border-slate-300'">
+            <input type="radio" name="schema" class="mt-1 accent-indigo-600" :value="s.id" x-model="schemaId">
+            <span class="min-w-0">
+              <span class="block font-medium text-slate-900" x-text="s.name"></span>
+              <span class="block text-xs text-slate-500" x-text="`${s.fields.length} fields · ${s.fields.filter(f => f.required).length} required`"></span>
+            </span>
+          </label>
+        </template>
+      </div>
+      <a href="/schemas/new" class="mt-3 inline-flex text-sm font-medium text-indigo-600 hover:text-indigo-500">+ Create new schema</a>
+
+      <div class="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-3">
+        <label class="flex items-start gap-3 cursor-pointer" :class="!aiAvailable && 'opacity-60'">
+          <button type="button" role="switch" class="toggle mt-0.5" :class="ai ? 'bg-indigo-600' : 'bg-slate-300'" :aria-checked="ai" @click="if (aiAvailable) ai = !ai" :disabled="!aiAvailable">
+            <span class="toggle-knob" :class="ai ? 'translate-x-5' : 'translate-x-0'"></span>
+          </button>
+          <span class="text-sm">
+            <span class="font-medium text-slate-900">Use AI suggestions</span>
+            <span class="block text-xs text-slate-500 mt-0.5">AI-assisted mapping is optional. When enabled, column names and a few masked sample values may be sent to Google Gemini for columns the deterministic engine can't resolve.</span>
+            <span x-show="!aiAvailable" class="block text-xs text-slate-400 mt-1">Not configured on this server (set <span class="kbd">GEMINI_API_KEY</span>).</span>
+          </span>
+        </label>
+      </div>
+
+      <button class="btn-primary mt-5 w-full py-2.5" :disabled="!schemaId || busy" @click="go()">
+        <span x-show="!busy">Continue to mapping →</span>
+        <span x-show="busy" class="inline-flex items-center gap-2"><span class="spinner !border-white/40 !border-t-white"></span> Analyzing columns…</span>
+      </button>
+    </div>
+  </aside>
+</div>
+
+<script>
+function inspectStep() {
+  return {
+    schemas: window.SCHEMAS, schemaId: window.JOB.schema_id || (window.SCHEMAS[0] && window.SCHEMAS[0].id),
+    ai: window.JOB.ai_enabled && window.AI_AVAILABLE, aiAvailable: window.AI_AVAILABLE, busy: false,
+    async go() {
+      this.busy = true;
+      try {
+        await MI.api('POST', `/api/v1/imports/${window.JOB.id}/schema`, { schema_id: this.schemaId, ai_enabled: this.ai });
+        window.location.href = `/imports/${window.JOB.id}?step=3`;
+      } catch (e) { this.busy = false; }
+    },
+    async selectSheet(name) {
+      this.busy = true;
+      try { await MI.api('POST', `/api/v1/imports/${window.JOB.id}/sheet`, { sheet_name: name }); window.location.reload(); }
+      catch (e) { this.busy = false; }
+    },
+  };
+}
+</script>
