@@ -1,0 +1,138 @@
+{# STEP 5 — Data quality dashboard #}
+<div x-data="validateStep()" x-init="load()">
+  <div class="mb-5 flex flex-wrap items-start justify-between gap-4">
+    <div>
+      <h2 class="text-lg font-semibold text-slate-900">Data quality</h2>
+      <p class="mt-1 text-sm text-slate-600" x-text="`Validated ${MI.fmt(s.rows)} rows against ${window.SCHEMA.name} in ${s.validation_ms ?? '–'} ms.`"></p>
+    </div>
+    <div class="flex gap-2">
+      <button class="btn-secondary" :disabled="busy" @click="revalidate()">Re-run validation</button>
+      <a :href="`/imports/${job.id}?step=6`" class="btn-primary">Review rows →</a>
+    </div>
+  </div>
+
+  <div class="grid md:grid-cols-4 gap-4">
+    <div class="stat md:col-span-1">
+      <div class="stat-label">Rows</div>
+      <div class="stat-value mt-1" x-text="MI.fmt(s.rows)"></div>
+      <div class="mt-3 progress-bar flex h-2.5 overflow-hidden rounded-full bg-slate-100">
+        <span class="bg-emerald-500" :style="`width:${pct(s.ready)}%`"></span>
+        <span class="bg-amber-400" :style="`width:${pct(s.warning)}%`"></span>
+        <span class="bg-rose-500" :style="`width:${pct(s.error)}%`"></span>
+      </div>
+    </div>
+    <a :href="`/imports/${job.id}?step=6&status=ready`" class="stat hover:border-emerald-300 transition"><div class="stat-label text-emerald-600">Ready</div><div class="stat-value mt-1 text-emerald-600" x-text="MI.fmt(s.ready)"></div><p class="mt-1 text-xs text-slate-500">No issues</p></a>
+    <a :href="`/imports/${job.id}?step=6&status=warning`" class="stat hover:border-amber-300 transition"><div class="stat-label text-amber-600">Warnings</div><div class="stat-value mt-1 text-amber-600" x-text="MI.fmt(s.warning)"></div><p class="mt-1 text-xs text-slate-500">Importable, worth a look</p></a>
+    <a :href="`/imports/${job.id}?step=6&status=error`" class="stat hover:border-rose-300 transition"><div class="stat-label text-rose-600">Errors</div><div class="stat-value mt-1 text-rose-600" x-text="MI.fmt(s.error)"></div><p class="mt-1 text-xs text-slate-500">Excluded from "ready" export</p></a>
+  </div>
+
+  <div class="mt-4 rounded-2xl border border-slate-200 bg-gradient-to-r from-indigo-600 to-violet-600 p-6 text-white shadow-sm flex flex-wrap items-center justify-between gap-4">
+    <div>
+      <p class="text-sm/5 text-indigo-100">Import-ready</p>
+      <p class="text-4xl font-semibold tracking-tight" x-text="`${s.ready_pct ?? 0}%`"></p>
+    </div>
+    <p class="max-w-md text-sm text-indigo-100" x-text="`${MI.fmt(s.importable)} of ${MI.fmt(s.rows)} rows can be exported right now. ${s.error ? MI.fmt(s.error) + ' rows need attention.' : 'Nothing blocks the import.'}`"></p>
+  </div>
+
+  <div class="mt-6 grid lg:grid-cols-2 gap-6">
+    <div class="card">
+      <div class="px-6 pt-5 pb-3"><h3 class="text-base font-semibold text-slate-900">Top issues</h3></div>
+      <ul class="divide-y divide-slate-100">
+        <template x-for="t in (s.top_issues || [])" :key="t.code + t.field">
+          <li>
+            <a :href="`/imports/${job.id}?step=6&code=${t.code}&field=${t.field || ''}`" class="flex items-center gap-3 px-6 py-3 hover:bg-slate-50">
+              <span :class="t.severity === 'ERROR' ? 'badge badge-error' : 'badge badge-medium'" x-text="t.severity"></span>
+              <span class="flex-1 text-sm text-slate-800" x-text="t.message"></span>
+              <span class="tabular-nums text-sm font-semibold text-slate-900" x-text="t.count"></span>
+            </a>
+          </li>
+        </template>
+        <li x-show="!(s.top_issues || []).length" class="px-6 py-8 text-center text-sm text-slate-500">No issues found. 🎉</li>
+      </ul>
+      <template x-if="(s.dataset_issues || []).length">
+        <div class="border-t border-slate-100 px-6 py-4 text-sm">
+          <p class="font-medium text-rose-700">Dataset-level problems</p>
+          <template x-for="d in s.dataset_issues"><p class="mt-1 text-rose-700" x-text="d.message"></p></template>
+          <a :href="`/imports/${job.id}?step=3`" class="mt-2 inline-block text-indigo-600 hover:underline">Fix mapping</a> · <a :href="`/imports/${job.id}?step=4`" class="text-indigo-600 hover:underline">Set a default</a>
+        </div>
+      </template>
+    </div>
+
+    <div class="card">
+      <div class="px-6 pt-5 pb-3">
+        <h3 class="text-base font-semibold text-slate-900">Suggested bulk fixes</h3>
+        <p class="text-sm text-slate-600">One click applies the same correction to every affected row. Everything is undoable.</p>
+      </div>
+      <ul class="divide-y divide-slate-100">
+        <template x-for="(b, i) in bulk" :key="i">
+          <li class="flex items-center gap-3 px-6 py-3">
+            <div class="flex-1 min-w-0">
+              <p class="text-sm text-slate-800" x-text="b.label"></p>
+              <p class="text-xs text-slate-500" x-text="`${b.count} row${b.count === 1 ? '' : 's'} · ${b.field}`"></p>
+            </div>
+            <button class="btn-primary btn-sm" :disabled="busy" @click="applyBulk(b)" x-text="`Apply to ${b.count}`"></button>
+          </li>
+        </template>
+        <li x-show="!bulk.length" class="px-6 py-8 text-center text-sm text-slate-500">No bulk fixes to suggest — remaining problems need a human eye.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="mt-6 card card-pad">
+    <h3 class="text-base font-semibold text-slate-900">Issue log</h3>
+    <div class="mt-3 flex flex-wrap gap-2">
+      <template x-for="sev in ['', 'ERROR', 'WARNING']" :key="sev">
+        <button class="btn-secondary btn-sm" :class="filter === sev && 'ring-2 ring-indigo-500 border-indigo-500 text-indigo-700'" @click="filter = sev; loadIssues()" x-text="sev || 'All'"></button>
+      </template>
+    </div>
+    <div class="mt-3 overflow-x-auto">
+      <table class="table">
+        <thead><tr><th>Row</th><th>Field</th><th>Severity</th><th>Problem</th><th>Original value</th></tr></thead>
+        <tbody>
+          <template x-for="it in issues.items" :key="it.row_index + '-' + it.field + '-' + it.code">
+            <tr>
+              <td class="tabular-nums text-slate-500" x-text="it.row_number ?? 'dataset'"></td>
+              <td class="font-medium text-slate-800" x-text="it.field || '—'"></td>
+              <td><span :class="it.severity === 'ERROR' ? 'badge badge-error' : 'badge badge-medium'" x-text="it.severity"></span></td>
+              <td x-text="it.message"></td>
+              <td class="font-mono text-xs text-slate-600 max-w-xs truncate" :title="it.original_value" x-text="it.original_value ?? ''"></td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+    <div class="mt-3 flex items-center justify-between text-sm text-slate-600">
+      <span x-text="`${MI.fmt(issues.total)} issues`"></span>
+      <div class="flex gap-2">
+        <button class="btn-secondary btn-sm" :disabled="issues.page <= 1" @click="issues.page--; loadIssues()">← Prev</button>
+        <button class="btn-secondary btn-sm" :disabled="issues.page * issues.page_size >= issues.total" @click="issues.page++; loadIssues()">Next →</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function validateStep() {
+  return {
+    job: window.JOB, s: window.JOB.summary || {}, bulk: [], issues: { items: [], total: 0, page: 1, page_size: 50 }, filter: '', busy: false,
+    pct(n) { return this.s.rows ? (100 * (n || 0) / this.s.rows) : 0; },
+    async load() { this.bulk = await MI.api('GET', `/api/v1/imports/${this.job.id}/bulk-fixes`); await this.loadIssues(); },
+    async loadIssues() {
+      const q = new URLSearchParams({ page: this.issues.page, page_size: 50 });
+      if (this.filter) q.set('severity', this.filter);
+      this.issues = await MI.api('GET', `/api/v1/imports/${this.job.id}/issues?${q}`);
+    },
+    async refresh() { const j = await MI.api('GET', `/api/v1/imports/${this.job.id}`); this.s = j.summary; },
+    async applyBulk(b) {
+      this.busy = true;
+      try {
+        if (b.type === 'trim') await MI.api('POST', `/api/v1/imports/${this.job.id}/bulk-fixes/trim`, { field: b.field });
+        else await MI.api('POST', `/api/v1/imports/${this.job.id}/bulk-fixes/replace`, { field: b.field, from_value: b.from_value, to_value: b.to_value });
+        MI.toast(`Applied to ${b.count} rows`, 'success');
+        await this.refresh(); await this.load();
+      } finally { this.busy = false; }
+    },
+    async revalidate() { this.busy = true; try { await MI.api('POST', `/api/v1/imports/${this.job.id}/validate`); window.location.reload(); } finally { this.busy = false; } },
+  };
+}
+</script>
