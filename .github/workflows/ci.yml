@@ -70,6 +70,8 @@ jobs:
   e2e:
     name: browser demo (Playwright)
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # only used to post the failure log as a commit comment
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -89,7 +91,17 @@ jobs:
           mkdir -p data
           nohup uvicorn app.main:app --host 127.0.0.1 --port 8000 > uvicorn.log 2>&1 &
           for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8000/healthz && break; sleep 1; done
-      - run: python scripts/browser_demo.py --out e2e-screenshots
+      - name: Run browser demo
+        run: |
+          set -o pipefail
+          python scripts/browser_demo.py --out e2e-screenshots 2>&1 | tee e2e.log
+      - name: Publish failure log as a commit comment
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          { printf '### %s: browser demo failed\n\n```\n' "${{ github.workflow }}"; tail -c 60000 e2e.log; printf '\n```\n'; } > comment.md
+          gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/comments" -F body=@comment.md || echo "could not post the comment"
       - uses: actions/upload-artifact@v4
         if: always()
         with:

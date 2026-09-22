@@ -32,10 +32,19 @@ def step_url(page: Page) -> int:
     return int(m.group(1)) if m else 0
 
 
+def wait_alpine(page: Page) -> None:
+    """Wait until Alpine has initialised the page (its handlers are attached only then)."""
+    page.wait_for_function(
+        "() => window.Alpine && Array.from(document.querySelectorAll('[x-data]'))"
+        ".every(el => el._x_dataStack !== undefined)"
+    )
+
+
 def run_import(page: Page, out: Path, filename: str, prefix: str, with_shots: bool) -> dict:
     """with_shots=True captures every step; a prefix captures only the mapping step."""
     print(f"\n▶ {filename}")
     page.goto("/imports/new")
+    wait_alpine(page)
     if with_shots:
         shot(page, out, "02-upload")
     page.set_input_files("input[type=file]", str(DEMO / filename))
@@ -91,7 +100,27 @@ def run_import(page: Page, out: Path, filename: str, prefix: str, with_shots: bo
     return {"job_id": job_id, "stats": stats}
 
 
+_STATE: dict = {}  # current page / output dir, for failure diagnostics
+
+
 def main() -> int:
+    try:
+        return _main()
+    except Exception as exc:  # print where we were so CI logs are actionable
+        page = _STATE.get("page")
+        print(f"\n❌ browser demo failed: {type(exc).__name__}: {exc}")
+        if page is not None:
+            try:
+                print(f"   url: {page.url}")
+                out = Path(_STATE.get("out", "."))
+                page.screenshot(path=str(out / "zz-failure.png"), full_page=True)
+                print("   screenshot: zz-failure.png")
+            except Exception:  # pragma: no cover - best effort
+                pass
+        return 1
+
+
+def _main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", default=os.environ.get("BASE_URL", "http://127.0.0.1:8000"))
     ap.add_argument("--out", default=str(ROOT / "docs" / "screenshots"))
@@ -112,6 +141,8 @@ def main() -> int:
             accept_downloads=True,
         )
         page = ctx.new_page()
+        page.set_default_timeout(45_000)
+        _STATE.update(page=page, out=out)
         errors: list[str] = []
         page.on("pageerror", lambda e: errors.append(str(e)))
         page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
@@ -191,6 +222,7 @@ def main() -> int:
         legacy = run_import(page, out, "legacy-crm.csv", "09-legacy", with_shots=False)
         # 5) third file: multi-sheet xlsx ------------------------------------------
         page.goto("/imports/new")
+        wait_alpine(page)
         page.set_input_files("input[type=file]", str(DEMO / "partner-export.xlsx"))
         page.wait_for_url(re.compile(r"/imports/[0-9a-f]{32}$"))
         expect(page.get_by_text("Choose a sheet")).to_be_visible()
