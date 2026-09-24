@@ -46,7 +46,30 @@ def get_session_factory() -> sessionmaker[Session]:
 def init_db() -> None:
     from app import models  # noqa: F401  (register tables)
 
-    Base.metadata.create_all(get_engine())
+    engine = get_engine()
+    Base.metadata.create_all(engine)
+    _add_missing_columns(engine)
+
+
+def _add_missing_columns(engine) -> None:
+    """Tiny additive migration: new nullable columns are added to existing SQLite files.
+
+    There are no destructive migrations in this project; a column that is added to a model
+    later must be nullable, and this makes an existing ``data/magic_import.db`` pick it up.
+    """
+    from sqlalchemy import inspect, text
+
+    insp = inspect(engine)
+    with engine.begin() as conn:
+        for table in Base.metadata.sorted_tables:
+            if not insp.has_table(table.name):
+                continue
+            existing = {c["name"] for c in insp.get_columns(table.name)}
+            for col in table.columns:
+                if col.name in existing or not col.nullable:
+                    continue
+                ddl = col.type.compile(dialect=engine.dialect)
+                conn.execute(text(f'ALTER TABLE "{table.name}" ADD COLUMN "{col.name}" {ddl}'))
 
 
 def reset_engine_for_tests() -> None:

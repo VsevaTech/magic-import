@@ -21,6 +21,8 @@ dependencies = [
     "charset-normalizer>=3.3",
     "email-validator>=2.2",
     "httpx>=0.27",
+    "pyyaml>=6.0",
+    "jsonschema>=4.23",
 ]
 
 [project.optional-dependencies]
