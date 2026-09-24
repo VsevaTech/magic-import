@@ -1,0 +1,195 @@
+# Demo API contract for the "schema from OpenAPI" flow.
+#   Schemas → Import from OpenAPI → merchant-api.yaml → POST /v1/merchants
+#   then import demo-data/merchant-onboarding.xlsx into the generated schema.
+# Deliberately realistic: $ref, allOf, nullable (3.1 type lists), readOnly, enum, default,
+# nested object, list of strings, an array of objects and a file upload (both skipped).
+openapi: 3.1.0
+info:
+  title: Acme Payments API
+  version: 1.4.0
+  description: Merchant onboarding for a payments / POS platform (fictional).
+paths:
+  /v1/merchants:
+    post:
+      operationId: createMerchant
+      summary: Onboard a merchant
+      requestBody:
+        $ref: "#/components/requestBodies/MerchantCreate"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Merchant"
+  /v1/merchants/{merchantId}:
+    parameters:
+      - name: merchantId
+        in: path
+        required: true
+        schema: { type: string }
+    patch:
+      operationId: updateMerchant
+      summary: Update merchant contact details
+      requestBody:
+        content:
+          application/merge-patch+json:
+            schema:
+              $ref: "#/components/schemas/MerchantUpdate"
+      responses:
+        "200": { description: Updated }
+  /v1/merchants/{merchantId}/documents:
+    post:
+      operationId: uploadDocument
+      summary: Upload a KYC document
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [kind, file]
+              properties:
+                kind: { type: string, enum: [trade_license, passport, bank_letter] }
+                file: { type: string, format: binary }
+      responses:
+        "201": { description: Uploaded }
+  /v1/terminals:
+    post:
+      operationId: createTerminal
+      summary: Register a POS terminal
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [merchantExternalId, serialNumber, model]
+              properties:
+                merchantExternalId: { type: string, maxLength: 64 }
+                serialNumber: { type: string, pattern: "^[A-Z0-9]{8,20}$" }
+                model: { type: string, enum: [A920, A80, S920] }
+                activatedAt: { type: string, format: date-time }
+      responses:
+        "201": { description: Created }
+components:
+  requestBodies:
+    MerchantCreate:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/MerchantCreate"
+  schemas:
+    CountryCode:
+      type: string
+      pattern: "^[A-Z]{2}$"
+      description: ISO 3166-1 alpha-2 country code.
+      example: AE
+    CurrencyCode:
+      type: string
+      pattern: "^[A-Z]{3}$"
+      description: ISO 4217 currency code.
+      example: AED
+    Address:
+      type: object
+      required: [line1, city, country]
+      properties:
+        line1:
+          type: string
+          maxLength: 120
+          x-aliases: [street, address line 1, street address]
+        line2: { type: [string, "null"], maxLength: 120 }
+        city: { type: string, maxLength: 80 }
+        postalCode:
+          type: string
+          maxLength: 16
+          x-aliases: [postcode, zip, zip code]
+        country: { $ref: "#/components/schemas/CountryCode" }
+    Owner:
+      type: object
+      properties:
+        fullName: { type: string }
+        share: { type: number, minimum: 0, maximum: 100 }
+    MerchantBase:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        externalId:
+          type: string
+          maxLength: 64
+          description: Your own merchant reference (unique per partner).
+          x-unique: true
+          x-aliases: [merchant ref, merchant reference, mid]
+        legalName:
+          type: string
+          minLength: 2
+          maxLength: 140
+          description: Registered legal name.
+          x-aliases: [company legal name, registered name]
+        tradingName:
+          type: string
+          maxLength: 140
+          x-aliases: [trading as, dba, brand]
+        email:
+          type: string
+          format: email
+          description: Primary contact email.
+          x-aliases: [contact email, e-mail]
+        phone:
+          type: string
+          pattern: "^\\+[1-9]\\d{6,14}$"
+          description: Contact phone in E.164.
+        mcc:
+          type: string
+          pattern: "^\\d{4}$"
+          description: ISO 18245 merchant category code.
+          example: "5812"
+        settlementCurrency: { $ref: "#/components/schemas/CurrencyCode" }
+        monthlyVolume:
+          type: number
+          minimum: 0
+          description: Expected monthly card volume in the settlement currency.
+        acceptsTips:
+          type: boolean
+          default: false
+        riskLevel:
+          type: string
+          enum: [low, medium, high]
+          default: medium
+        onboardedAt:
+          type: string
+          format: date
+          x-aliases: [onboarded, onboarding date]
+        website:
+          type: [string, "null"]
+          format: uri
+        tags:
+          type: array
+          items: { type: string, maxLength: 32 }
+        address: { $ref: "#/components/schemas/Address" }
+    MerchantCreate:
+      allOf:
+        - $ref: "#/components/schemas/MerchantBase"
+        - type: object
+          required: [externalId, legalName, email, settlementCurrency, address]
+          properties:
+            owners:
+              type: array
+              items: { $ref: "#/components/schemas/Owner" }
+    MerchantUpdate:
+      type: object
+      properties:
+        email: { type: string, format: email }
+        phone: { type: string }
+        metadata:
+          type: object
+          additionalProperties: { type: string }
+    Merchant:
+      allOf:
+        - $ref: "#/components/schemas/MerchantBase"
+        - type: object
+          properties:
+            status: { type: string, enum: [pending, active, blocked] }
+            createdAt: { type: string, format: date-time, readOnly: true }

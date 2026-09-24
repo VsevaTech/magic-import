@@ -388,9 +388,138 @@ def main() -> None:
         ),
     )
 
+    merchant_counts = write_merchant_onboarding(HERE / "merchant-onboarding.xlsx")
+
     print("acme-customers.xlsx", acme_counts)
     print("legacy-crm.csv", legacy_counts)
     print("partner-export.xlsx", partner_counts)
+    print("merchant-onboarding.xlsx", merchant_counts)
+
+
+# ------------------------------------------------------------ merchant-onboarding.xlsx
+# Imports into the schema built from demo-data/merchant-api.yaml (POST /v1/merchants).
+# Own RNG so the customer files above stay byte-for-byte reproducible.
+MERCHANT_NAMES = [
+    "Al Noor Trading",
+    "Desert Rose Cafe",
+    "Blue Lagoon Spa",
+    "Falcon Electronics",
+    "Palm Grove Bakery",
+    "Oasis Pharmacy",
+    "Gulf Star Motors",
+    "Marina Fresh Market",
+    "Zayed Books",
+    "Silk Road Carpets",
+    "Harbour Fish House",
+    "Golden Dune Tours",
+    "Crescent Tailors",
+    "Sunrise Laundry",
+    "Pearl Jewellers",
+    "Cedar Grill",
+    "Nomad Coffee",
+    "Skyline Fitness",
+    "Amber Florist",
+    "Horizon Optics",
+]
+MERCHANT_CITIES = {
+    "AE": (["Dubai", "Abu Dhabi", "Sharjah"], ["United Arab Emirates", "UAE", "AE"], "AED"),
+    "SA": (["Riyadh", "Jeddah"], ["Saudi Arabia", "KSA", "SA"], "SAR"),
+    "GB": (["London", "Manchester"], ["United Kingdom", "UK", "GB"], "GBP"),
+}
+STREETS = ["Al Wasl Rd", "King Fahd Rd", "High St", "Sheikh Zayed Rd", "Corniche St"]
+MCCS = ["5812", "5411", "5999", "7230", "5732", "5912", "5541", "7997"]
+
+
+def write_merchant_onboarding(path: Path) -> dict:
+    mrng = random.Random(2026)
+    rows = []
+    for i in range(120):
+        iso = mrng.choices(list(MERCHANT_CITIES), weights=[60, 25, 15])[0]
+        cities, country_names, ccy = MERCHANT_CITIES[iso]
+        base = mrng.choice(MERCHANT_NAMES)
+        slug = base.lower().replace(" ", "")
+        if iso == "AE":
+            phone = (
+                mrng.choice(["+97150", "050 ", "+971 55 "]) + f"{mrng.randint(1000000, 9999999)}"
+            )
+        elif iso == "SA":
+            phone = f"+9665{mrng.randint(10000000, 99999999)}"
+        else:
+            phone = mrng.choice(["+447400", "07400 "]) + f"{mrng.randint(100000, 999999)}"
+        y, m, d = mrng.randint(2023, 2026), mrng.randint(1, 12), mrng.randint(1, 28)
+        rows.append(
+            {
+                "ref": f"MRC-{2001 + i}",
+                "legal": f"{base} {mrng.choice(['LLC', 'FZ-LLC', 'Ltd', 'Trading LLC'])}",
+                "trading": base,
+                "email": f"finance{i}@{slug}.example",
+                "phone": phone,
+                "street": f"{mrng.randint(1, 250)} {mrng.choice(STREETS)}",
+                "city": mrng.choice(cities),
+                "postcode": "" if iso != "GB" else f"M{mrng.randint(1, 9)} {mrng.randint(1, 9)}AB",
+                "country": mrng.choice(country_names),
+                "mcc": mrng.choice(MCCS),
+                "ccy": mrng.choice([ccy, ccy.lower(), ccy]),
+                "volume": f"{mrng.randint(5, 900) * 100}.{mrng.choice(['00', '50', '75'])}",
+                "tips": mrng.choice(["Yes", "No", "yes", "N", "Y"]),
+                "risk": mrng.choice(["low", "Medium", "", "high"]),
+                "onboarded": mrng.choice([f"{y:04d}-{m:02d}-{d:02d}", f"{d:02d}.{m:02d}.{y:04d}"]),
+                "website": mrng.choice(["", f"https://{slug}.example", f"www.{slug}.example"]),
+                "tags": mrng.choice(["", "retail", "food; delivery", "retail, premium"]),
+            }
+        )
+    idx = list(range(len(rows)))
+    mrng.shuffle(idx)
+    counts = {"invalid_email": 3, "bad_mcc": 3, "missing_legal_name": 2, "missing_city": 2}
+    counts.update({"duplicate_ref": 2, "negative_volume": 1, "unknown_currency": 2})
+    cursor = 0
+    for key, n in counts.items():
+        for i in idx[cursor : cursor + n]:
+            r = rows[i]
+            if key == "invalid_email":
+                r["email"] = r["email"].replace("@", " at ")
+            elif key == "bad_mcc":
+                r["mcc"] = mrng.choice(["581", "58 12", "MCC5812"])
+            elif key == "missing_legal_name":
+                r["legal"] = mrng.choice(["", "N/A"])
+            elif key == "missing_city":
+                r["city"] = ""
+            elif key == "duplicate_ref":
+                r["ref"] = rows[(i + 5) % len(rows)]["ref"]
+            elif key == "negative_volume":
+                r["volume"] = "-1200.00"
+            elif key == "unknown_currency":
+                r["ccy"] = "dirhams"
+        cursor += n
+    headers = [
+        "Merchant Ref",
+        "Legal Name",
+        "Trading As",
+        "Contact Email",
+        "Phone",
+        "Street",
+        "City",
+        "Postcode",
+        "Country",
+        "MCC",
+        "Settlement Currency",
+        "Monthly Volume",
+        "Accepts Tips",
+        "Risk Level",
+        "Onboarded",
+        "Website",
+        "Tags",
+    ]
+    keys = ["ref", "legal", "trading", "email", "phone", "street", "city", "postcode"]
+    keys += ["country", "mcc", "ccy", "volume", "tips", "risk", "onboarded", "website", "tags"]
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Merchants"
+    ws.append(headers)
+    for r in rows:
+        ws.append([r[k] for k in keys])
+    wb.save(path)
+    return counts
 
 
 if __name__ == "__main__":
