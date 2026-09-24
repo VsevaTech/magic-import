@@ -33,6 +33,11 @@ TAGS = [
     {"name": "Review", "description": "Row-level review: inline edits, bulk fixes, undo."},
     {"name": "Export", "description": "CSV / XLSX / JSON exports and import reports."},
     {"name": "Schemas", "description": "Target data contracts (Schema Builder)."},
+    {
+        "name": "Contracts",
+        "description": "Build Import Schemas from OpenAPI 3.x / Swagger 2.0 / JSON Schema "
+        "request bodies.",
+    },
     {"name": "Templates", "description": "Saved mapping templates."},
     {"name": "Meta", "description": "Static reference data."},
 ]

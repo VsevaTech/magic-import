@@ -13,8 +13,19 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.db import get_db
 from app.schemas import api as dto
-from app.services import export_service, import_service, schema_service
-from app.services.errors import FileTooLargeError, InvalidInputError
+from app.services import (
+    contract_import,
+    export_service,
+    import_service,
+    payload_builder,
+    schema_service,
+)
+from app.services.errors import (
+    FileTooLargeError,
+    InvalidInputError,
+    InvalidStateError,
+    NotFoundError,
+)
 from app.services.mapping_engine import find_conflicts
 from app.services.validation_engine import ISSUE_TITLES
 
@@ -83,6 +94,85 @@ def update_schema(schema_id: str, payload: dto.SchemaUpdate, db: DB):
 def delete_schema(schema_id: str, db: DB):
     schema_service.delete_schema(db, schema_id)
     return Response(status_code=204)
+
+
+@router.get(
+    "/schemas/{schema_id}/contract",
+    tags=["Contracts"],
+    summary="The API contract (JSON Schema) a schema was built from",
+    responses={404: dto.ERROR_RESPONSES[404]},
+)
+def get_schema_contract(schema_id: str, db: DB):
+    schema = schema_service.get_schema(db, schema_id)
+    contract = (schema.source or {}).get("contract")
+    if not contract:
+        raise NotFoundError(f"Schema '{schema.name}' was not built from an API contract.")
+    return contract
+
+
+# ============================================================================ contracts
+@router.post(
+    "/schemas/from-contract/inspect",
+    response_model=dto.ContractInspectOut,
+    tags=["Contracts"],
+    summary="List the request bodies of an OpenAPI / JSON Schema document",
+    description="Parses the document (JSON or YAML, safe loader, max 2 MB) and returns every "
+    "operation with a JSON / form request body plus reusable object schemas, each with the "
+    "number of properties that can come from a spreadsheet column.",
+    responses={422: dto.ERROR_RESPONSES[422]},
+)
+def inspect_contract(payload: dto.ContractIn):
+    spec = contract_import.load_spec(payload.content)
+    fmt = contract_import.detect_format(spec)
+    info = spec.get("info") or {}
+    return {
+        "format": fmt,
+        "title": info.get("title") or spec.get("title"),
+        "version": str(info["version"]) if info.get("version") is not None else None,
+        "targets": contract_import.preview_targets(spec),
+    }
+
+
+@router.post(
+    "/schemas/from-contract/preview",
+    response_model=dto.ContractPreviewOut,
+    tags=["Contracts"],
+    summary="Preview the Import Schema built from one request body (nothing is saved)",
+    description="Flattens the request body into fields (`address.city` → `address_city`), "
+    "maps JSON Schema types/formats/constraints onto field types and rules, and reports what "
+    "was inferred or skipped (arrays of objects, free-form maps, binary, readOnly, cycles).",
+    responses={422: dto.ERROR_RESPONSES[422]},
+)
+def preview_contract(payload: dto.ContractPreviewIn):
+    spec = contract_import.load_spec(payload.content)
+    return contract_import.build_schema(spec, payload.target)
+
+
+@router.post(
+    "/schemas/from-contract",
+    response_model=dto.SchemaOut,
+    status_code=201,
+    tags=["Contracts"],
+    summary="Create an Import Schema from one request body",
+    description="Same as preview, then applies `overrides` (keyed by dotted JSON path) and "
+    "saves the schema together with its contract, so exports can produce and verify API "
+    "payloads.",
+    responses={422: dto.ERROR_RESPONSES[422]},
+)
+def create_schema_from_contract(payload: dto.ContractSchemaIn, db: DB):
+    spec = contract_import.load_spec(payload.content)
+    draft = contract_import.build_schema(spec, payload.target)
+    draft = contract_import.apply_overrides(
+        draft, {k: v.model_dump(exclude_none=True) for k, v in payload.overrides.items()}
+    )
+    if payload.name:
+        draft["name"] = payload.name.strip()
+    if payload.description is not None:
+        draft["description"] = payload.description
+    draft["source"]["build_report"] = draft.pop("report")
+    draft["source"]["skipped"] = draft.pop("skipped")
+    schema = schema_service.create_schema(db, draft)
+    return schema_service.schema_to_dict(schema)
 
 
 # ============================================================================ imports
@@ -429,7 +519,8 @@ def complete(import_id: str, db: DB):
     "/imports/{import_id}/export",
     tags=["Export"],
     summary="Download the normalized dataset",
-    description="`format` = csv | xlsx | json | errors (errors.csv with an `_issues` column). "
+    description="`format` = csv | xlsx | json | errors (errors.csv with an `_issues` column) | "
+    "payload (nested API request bodies, only for schemas built from a contract). "
     "`scope` = ready (default: rows without errors) | all | errors. Values starting with "
     "`= + - @` are neutralised against spreadsheet formula injection.",
     responses={
@@ -446,7 +537,7 @@ def complete(import_id: str, db: DB):
 def export(
     import_id: str,
     db: DB,
-    format: str = Query("csv", pattern="^(csv|xlsx|json|errors)$"),
+    format: str = Query("csv", pattern="^(csv|xlsx|json|errors|payload)$"),
     scope: str = Query("ready", pattern="^(ready|all|errors)$"),
 ):
     job = _job(db, import_id)
@@ -464,6 +555,10 @@ def export(
         return _download(data, f"{base}-errors.csv", "text/csv; charset=utf-8")
     selected = export_service.select_rows(job.normalized_rows, job.row_status, scope)
     rows = [rec for _, rec in selected]
+    if format == "payload":
+        _require_contract_fields(job)
+        data = payload_builder.to_payload_json(payload_builder.build_payloads(rows, job.schema))
+        return _download(data, f"{base}-payloads.json", "application/json")
     if format == "csv":
         return _download(
             export_service.to_csv(field_names, rows),
@@ -481,6 +576,49 @@ def export(
         f"{base}-normalized.xlsx",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
+
+
+def _require_contract_fields(job) -> None:
+    if not payload_builder.contract_fields(job.schema):
+        raise InvalidStateError(
+            f"Schema '{job.schema.name}' was not built from an API contract; "
+            "payload export needs fields with a JSON path."
+        )
+
+
+@router.get(
+    "/imports/{import_id}/contract-check",
+    response_model=dto.ContractCheckOut,
+    tags=["Export"],
+    summary="Build the API payloads and validate each one against the stored contract",
+    description="For schemas created from an OpenAPI request body: every exported row is "
+    "turned into the nested request body and validated with JSON Schema (draft 2020-12). "
+    "`row` in errors is the spreadsheet row number (header = row 1).",
+    responses={409: dto.ERROR_RESPONSES[409]},
+)
+def contract_check(
+    import_id: str,
+    db: DB,
+    scope: str = Query("ready", pattern="^(ready|all|errors)$"),
+):
+    job = _job(db, import_id)
+    import_service._require_validated(job)
+    _require_contract_fields(job)
+    source = job.schema.source or {}
+    contract = source.get("contract")
+    if not contract:
+        raise InvalidStateError(f"Schema '{job.schema.name}' has no stored contract.")
+    selected = export_service.select_rows(job.normalized_rows, job.row_status, scope)
+    payloads = payload_builder.build_payloads([rec for _, rec in selected], job.schema)
+    result = payload_builder.check_payloads(payloads, contract, [i + 2 for i, _ in selected])
+    return {
+        "target": source.get("target"),
+        "scope": scope,
+        "fields_not_in_contract": [
+            f.name for f in job.schema.fields if not (f.source or {}).get("path")
+        ],
+        **result,
+    }
 
 
 @router.get(

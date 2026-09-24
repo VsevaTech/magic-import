@@ -78,6 +78,12 @@ class SchemaFieldIn(BaseModel):
         examples=[{"max_length": 120}],
     )
     allow_multiple_sources: bool = False
+    source: dict[str, Any] | None = Field(
+        default=None,
+        description="Contract origin of the field (set when the schema is built from an API "
+        'contract): {"path": ["address", "city"], "json_type": "string", "list": false, '
+        '"nullable": false, "required_in_contract": true}. Drives the API-payload export.',
+    )
 
 
 class SchemaIn(BaseModel):
@@ -90,6 +96,11 @@ class SchemaIn(BaseModel):
         '{"when": {"field": "country", "op": "eq", "value": "IL"}, '
         '"then": {"field": "phone", "op": "phone_region", "value": "IL"}, '
         '"severity": "WARNING"}',
+    )
+    source: dict[str, Any] | None = Field(
+        default=None,
+        description="Origin of the schema. With `contract` (a JSON Schema of the request "
+        "body) exported payloads are checked against it.",
     )
 
     model_config = ConfigDict(
@@ -121,6 +132,7 @@ class SchemaUpdate(BaseModel):
     description: str | None = None
     fields: list[SchemaFieldIn] | None = None
     cross_field_rules: list[dict[str, Any]] | None = None
+    source: dict[str, Any] | None = None
 
 
 class SchemaFieldOut(SchemaFieldIn):
@@ -134,8 +146,114 @@ class SchemaOut(BaseModel):
     version: int
     is_builtin: bool
     cross_field_rules: list[dict[str, Any]]
+    source: dict[str, Any] | None = Field(
+        default=None,
+        description="Origin of the schema without the contract body "
+        "(`GET /schemas/{id}/contract` returns it).",
+    )
     created_at: str | None
     fields: list[SchemaFieldOut]
+
+
+# ----------------------------------------------------------------------------- contracts
+_SPEC_EXAMPLE = (
+    "openapi: 3.1.0\ninfo: {title: Payments API, version: 1.0.0}\npaths:\n"
+    "  /v1/merchants:\n    post:\n      operationId: createMerchant\n"
+    "      requestBody:\n        content:\n          application/json:\n"
+    "            schema:\n              type: object\n              required: [legalName]\n"
+    "              properties:\n                legalName: {type: string}\n"
+    "                email: {type: string, format: email}\n"
+)
+
+
+class ContractIn(BaseModel):
+    content: str = Field(
+        description="OpenAPI 3.x / Swagger 2.0 / JSON Schema document as JSON or YAML text "
+        "(max 2 MB). Only local `$ref` (`#/...`) are resolved; nothing is fetched.",
+        examples=[_SPEC_EXAMPLE],
+    )
+
+
+class ContractTargetOut(BaseModel):
+    id: str = Field(examples=["POST /v1/merchants"])
+    kind: Literal["operation", "schema"]
+    label: str
+    method: str | None = None
+    path: str | None = None
+    operation_id: str | None = None
+    summary: str = ""
+    content_type: str | None = None
+    deprecated: bool = False
+    field_count: int
+    skipped_count: int
+
+
+class ContractInspectOut(BaseModel):
+    format: Literal["openapi-3.1", "openapi-3.0", "swagger-2.0", "json-schema"]
+    title: str | None
+    version: str | None
+    targets: list[ContractTargetOut]
+
+
+class ContractPreviewIn(ContractIn):
+    target: str = Field(
+        description="Target id from `inspect` (`POST /v1/merchants`, `#/components/schemas/X`) "
+        "or an operationId.",
+        examples=["POST /v1/merchants"],
+    )
+
+
+class ContractNote(BaseModel):
+    level: Literal["info", "warning"]
+    path: str
+    message: str
+
+
+class ContractSkipped(BaseModel):
+    path: str
+    reason: str
+
+
+class ContractPreviewOut(BaseModel):
+    name: str
+    description: str
+    fields: list[SchemaFieldOut]
+    source: dict[str, Any]
+    report: list[ContractNote]
+    skipped: list[ContractSkipped]
+
+
+class ContractFieldOverride(BaseModel):
+    include: bool = True
+    name: str | None = Field(default=None, pattern=r"^[A-Za-z_][A-Za-z0-9_]*$", max_length=80)
+    display_name: str | None = None
+    type: FieldType | None = None
+    required: bool | None = None
+    unique: bool | None = None
+    aliases: list[str] | None = None
+    default: str | None = None
+
+
+class ContractSchemaIn(ContractPreviewIn):
+    name: str | None = Field(default=None, max_length=120)
+    description: str | None = None
+    overrides: dict[str, ContractFieldOverride] = Field(
+        default_factory=dict,
+        description="Per-property adjustments keyed by the dotted JSON path "
+        '(`"address.city"`): exclude a property, rename the field, change its type or flags.',
+        examples=[{"tags": {"include": False}, "externalId": {"unique": True}}],
+    )
+
+
+class ContractCheckOut(BaseModel):
+    target: str | None
+    scope: str
+    checked: int
+    valid: int
+    invalid: int
+    fields_not_in_contract: list[str]
+    errors: list[dict[str, Any]]
+    top_errors: list[dict[str, Any]]
 
 
 # ----------------------------------------------------------------------------- imports

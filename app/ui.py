@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
@@ -21,6 +21,7 @@ from app.services.schema_service import FIELD_TYPES
 from app.services.transformation_engine import KIND_LABELS
 
 BASE_DIR = Path(__file__).resolve().parent
+SAMPLE_SPEC = BASE_DIR.parent / "demo-data" / "merchant-api.yaml"
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 templates.env.filters["tojson_attr"] = lambda v: json.dumps(v, ensure_ascii=False)
 
@@ -124,7 +125,7 @@ def import_wizard(request: Request, import_id: str, db: DB, step: int | None = N
 
 
 @router.get("/schemas", response_class=HTMLResponse)
-def schemas_page(request: Request, db: DB):
+def schemas_page(request: Request, db: DB, created: str | None = None):
     schemas = [schema_service.schema_to_dict(s) for s in schema_service.list_schemas(db)]
     templates_ = [
         {
@@ -139,7 +140,13 @@ def schemas_page(request: Request, db: DB):
     return templates.TemplateResponse(
         request,
         "schemas.html",
-        _ctx(request, schemas=schemas, mapping_templates=templates_, active="schemas"),
+        _ctx(
+            request,
+            schemas=schemas,
+            mapping_templates=templates_,
+            created=created,
+            active="schemas",
+        ),
     )
 
 
@@ -150,6 +157,27 @@ def new_schema(request: Request):
         "schema_builder.html",
         _ctx(request, schema=None, field_types=FIELD_TYPES, active="schemas"),
     )
+
+
+@router.get("/schemas/from-contract", response_class=HTMLResponse)
+def schema_from_contract(request: Request):
+    return templates.TemplateResponse(
+        request,
+        "schema_from_contract.html",
+        _ctx(
+            request,
+            field_types=FIELD_TYPES,
+            sample_available=SAMPLE_SPEC.is_file(),
+            active="schemas",
+        ),
+    )
+
+
+@router.get("/samples/merchant-api.yaml")
+def sample_spec(request: Request):
+    if not SAMPLE_SPEC.is_file():
+        return render_error(request, 404, "The sample contract is not shipped with this build.")
+    return FileResponse(SAMPLE_SPEC, media_type="text/yaml; charset=utf-8")
 
 
 @router.get("/schemas/{schema_id}", response_class=HTMLResponse)
