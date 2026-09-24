@@ -188,7 +188,10 @@ class ValidationEngine:
                 issues.append(
                     Issue(i, f.name, sev, code, msg, orig_value if orig_value else svalue)
                 )
-                continue
+                if sev == ERROR:
+                    continue
+                # a doubtful value (warning) still has to satisfy the explicit rules: a
+                # phone that could not be normalized must not slip past a pattern
             issues.extend(self._rule_checks(i, f, svalue, orig_value))
         issues.extend(self._cross_field(i, rec))
         return issues

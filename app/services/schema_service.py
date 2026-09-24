@@ -419,7 +419,32 @@ def _normalize_field(raw: dict, position: int) -> SchemaField:
         default=(raw.get("default") if raw.get("default") not in ("", None) else None),
         rules=rules,
         allow_multiple_sources=bool(raw.get("allow_multiple_sources", False)),
+        source=_field_source(raw.get("source")),
     )
+
+
+def _check_source(source) -> None:
+    contract = source.get("contract") if isinstance(source, dict) else None
+    if contract is None:
+        return
+    from jsonschema import Draft202012Validator
+    from jsonschema.exceptions import SchemaError
+
+    try:
+        Draft202012Validator.check_schema(contract)
+    except SchemaError as exc:
+        raise InvalidInputError(
+            f"source.contract is not a valid JSON Schema: {exc.message}"
+        ) from exc
+
+
+def _field_source(raw) -> dict | None:
+    if not isinstance(raw, dict):
+        return None
+    path = raw.get("path")
+    if not (isinstance(path, list) and path and all(isinstance(p, str) and p for p in path)):
+        return None
+    return dict(raw)
 
 
 def create_schema(
@@ -435,11 +460,13 @@ def create_schema(
     dupes = {n for n in names if names.count(n) > 1}
     if dupes:
         raise InvalidInputError(f"Duplicate field names: {', '.join(sorted(dupes))}.")
+    _check_source(spec.get("source"))
     schema = ImportSchema(
         name=name,
         description=spec.get("description") or "",
         is_builtin=is_builtin,
         cross_field_rules=list(spec.get("cross_field_rules") or []),
+        source=spec.get("source") if isinstance(spec.get("source"), dict) else None,
     )
     for i, raw in enumerate(fields_raw):
         schema.fields.append(_normalize_field(raw, i))
@@ -456,6 +483,9 @@ def update_schema(db: Session, schema_id: str, spec: dict) -> ImportSchema:
         schema.name = spec["name"].strip()
     if "description" in spec:
         schema.description = spec.get("description") or ""
+    if isinstance(spec.get("source"), dict):
+        _check_source(spec["source"])
+        schema.source = spec["source"]
     if "cross_field_rules" in spec:
         schema.cross_field_rules = list(spec.get("cross_field_rules") or [])
     if "fields" in spec:
@@ -497,6 +527,15 @@ def delete_schema(db: Session, schema_id: str) -> None:
     db.commit()
 
 
+def source_summary(source: dict | None) -> dict | None:
+    """Schema origin without the (possibly large) contract body."""
+    if not source:
+        return None
+    out = {k: v for k, v in source.items() if k != "contract"}
+    out["has_contract"] = bool(source.get("contract"))
+    return out
+
+
 def schema_to_dict(schema: ImportSchema) -> dict:
     return {
         "id": schema.id,
@@ -505,6 +544,7 @@ def schema_to_dict(schema: ImportSchema) -> dict:
         "version": schema.version,
         "is_builtin": schema.is_builtin,
         "cross_field_rules": schema.cross_field_rules or [],
+        "source": source_summary(schema.source),
         "created_at": schema.created_at.isoformat() if schema.created_at else None,
         "fields": [
             {
@@ -519,6 +559,7 @@ def schema_to_dict(schema: ImportSchema) -> dict:
                 "default": f.default,
                 "rules": f.rules or {},
                 "allow_multiple_sources": f.allow_multiple_sources,
+                "source": f.source,
             }
             for f in schema.fields
         ],

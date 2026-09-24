@@ -154,6 +154,16 @@ class TransformationEngine:
         self.field_by_name = {f.name: f for f in fields}
         self.transformations = [t for t in transformations if t.enabled]
         self.defaults = dict(defaults or {})
+        # enum fields: lower-case spelling -> the allowed value (only when unambiguous)
+        self.enum_canonical: dict[str, dict[str, str]] = {}
+        for f in fields:
+            allowed = (getattr(f, "rules", None) or {}).get("enum") or []
+            if f.type != "enum" or not allowed:
+                continue
+            lowered: dict[str, list[str]] = {}
+            for a in allowed:
+                lowered.setdefault(str(a).lower(), []).append(str(a))
+            self.enum_canonical[f.name] = {k: v[0] for k, v in lowered.items() if len(v) == 1}
         # target -> ordered source columns
         self.sources_for: dict[str, list[str]] = {}
         for src, tgt in self.mapping.items():
@@ -263,6 +273,13 @@ class TransformationEngine:
                 record[name] = value
                 if warn:
                     notes[name] = warn
+
+        # enum values take the exact spelling of the allowed value ("Medium" -> "medium"):
+        # validation accepts any case, so the exported value must not keep the source casing
+        for name, canonical in self.enum_canonical.items():
+            v = record.get(name)
+            if isinstance(v, str) and v:
+                record[name] = canonical.get(v.strip().lower(), v)
         return record, notes
 
     # ------------------------------------------------------------------ internals

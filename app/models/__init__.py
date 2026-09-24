@@ -36,6 +36,9 @@ class ImportSchema(Base):
     version: Mapped[int] = mapped_column(Integer, default=1)
     is_builtin: Mapped[bool] = mapped_column(Boolean, default=False)
     cross_field_rules: Mapped[list] = mapped_column(JSON, default=list)
+    # where the schema came from, e.g. {"kind": "contract", "target": "POST /v1/merchants",
+    # "contract": {...JSON Schema of the request body...}}; None for hand-made schemas
+    source: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now
@@ -69,6 +72,8 @@ class SchemaField(Base):
     #  "min_date":..,"max_date":..}
     rules: Mapped[dict] = mapped_column(JSON, default=dict)
     allow_multiple_sources: Mapped[bool] = mapped_column(Boolean, default=False)
+    # contract origin of the field: {"path": ["address", "city"], "json_type": "string", ...}
+    source: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     schema: Mapped[ImportSchema] = relationship(back_populates="fields")
 
