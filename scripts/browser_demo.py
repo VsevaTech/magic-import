@@ -40,7 +40,14 @@ def wait_alpine(page: Page) -> None:
     )
 
 
-def run_import(page: Page, out: Path, filename: str, prefix: str, with_shots: bool) -> dict:
+def run_import(
+    page: Page,
+    out: Path,
+    filename: str,
+    prefix: str,
+    with_shots: bool,
+    schema: str = "Customer Import v1",
+) -> dict:
     """with_shots=True captures every step; a prefix captures only the mapping step."""
     print(f"\n▶ {filename}")
     page.goto("/imports/new")
@@ -56,7 +63,7 @@ def run_import(page: Page, out: Path, filename: str, prefix: str, with_shots: bo
     expect(page.get_by_text("File inspection")).to_be_visible()
     if with_shots:
         shot(page, out, "03-inspect", full=True)
-    page.get_by_label("Customer Import v1").check()
+    page.get_by_label(schema).check()
     page.get_by_role("button", name=re.compile("Continue to mapping")).click()
     page.wait_for_url(re.compile(r"step=3"))
 
@@ -81,6 +88,8 @@ def run_import(page: Page, out: Path, filename: str, prefix: str, with_shots: bo
     labels = page.locator("li .toggle + div p.font-medium").all_inner_texts()
     print("  transformations:", "; ".join(labels))
     assert any("Phone" in x for x in labels) and any("Country" in x for x in labels)
+    if schema != "Customer Import v1":
+        assert any("Currency" in x for x in labels) and any("Decimal" in x for x in labels)
     if with_shots:
         shot(page, out, "05-transform", full=True)
     page.get_by_role("button", name=re.compile("Run validation")).click()
@@ -257,6 +266,55 @@ def _main() -> int:
             shot(page, out, "11-openapi")
         except Exception:
             print("  (skipped OpenAPI screenshot: Swagger UI assets not reachable)")
+
+        # 7) schema from an API contract → import → verified payloads -----------------
+        print("\n▶ schema from OpenAPI (merchant-api.yaml → POST /v1/merchants)")
+        page.goto("/schemas")
+        wait_alpine(page)
+        page.get_by_test_id("from-openapi").click()
+        page.wait_for_url(re.compile(r"/schemas/from-contract$"))
+        wait_alpine(page)
+        page.get_by_test_id("contract-sample").click()
+        targets = page.get_by_test_id("contract-targets")
+        expect(targets.get_by_text("/v1/merchants", exact=True)).to_be_visible()
+        print("  operations:", targets.locator("li button").count())
+        shot(page, out, "13-openapi-targets", full=True)
+        targets.get_by_text("/v1/merchants", exact=True).click()
+        fields = page.get_by_test_id("contract-fields")
+        expect(fields.get_by_text("address.city", exact=True)).to_be_visible()
+        n_fields = fields.locator("tbody tr").count()
+        skipped = page.get_by_test_id("contract-skipped").inner_text()
+        print(f"  preview: {n_fields} fields; skipped: {' / '.join(skipped.splitlines()[::2])}")
+        assert n_fields == 18 and "owners" in skipped and "id" in skipped
+        shot(page, out, "14-openapi-fields", full=True)
+        schema_name = page.get_by_test_id("contract-name").input_value()
+        page.get_by_test_id("contract-create").click()
+        page.wait_for_url(re.compile(r"/schemas\?created="))
+        expect(page.get_by_text("API contract").first).to_be_visible()
+        print(f"  created schema {schema_name!r}")
+
+        merchants = run_import(
+            page,
+            out,
+            "merchant-onboarding.xlsx",
+            "15-openapi",
+            with_shots=False,
+            schema=schema_name,
+        )
+        mjob = merchants["job_id"]
+        assert merchants["stats"] == {"ready": 100, "warnings": 4, "errors": 16}, merchants
+        page.goto(f"/imports/{mjob}?step=7")
+        wait_alpine(page)
+        page.get_by_test_id("contract-check").click()
+        result = page.get_by_test_id("contract-result")
+        expect(result).to_contain_text("All 104 payloads match POST /v1/merchants")
+        print("  contract check:", " · ".join(result.inner_text().split("\n")).strip(" ·✓"))
+        page.evaluate("window.scrollTo(0, 0)")
+        shot(page, out, "16-contract-check", full=True)
+        with page.expect_download() as dl:
+            page.get_by_test_id("payload-download").click()
+        dl.value.save_as(str(target / dl.value.suggested_filename))
+        print(f"  downloaded {dl.value.suggested_filename}")
 
         # mobile check
         mobile = browser.new_context(

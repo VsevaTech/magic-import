@@ -68,6 +68,8 @@ validation, error resolution and a normalized dataset at the end.
 | **Export** | CSV / XLSX (sheet `Data` + sheet `Import Report`) / JSON with target field names; *ready rows only / all / error rows only*; `errors.csv` with an `_issues` column; `import-report.json`. Formula injection protection built in. |
 | **Import history** | Every job keeps schema, mapping, transformations, summary and issues. Raw uploads are deleted after parsing. |
 | **Schema Builder** | Create your own target contracts: 12 field types, required / unique, aliases, defaults, validation rules, cross-field rules. |
+| **Schema from OpenAPI** | Load an OpenAPI 3.x / Swagger 2.0 / JSON Schema document, pick a request body such as `POST /v1/merchants` and get the Import Schema for it: `$ref`, `allOf` / `oneOf`, nullable, enums, formats and constraints are translated; nested objects are flattened and rebuilt on export. |
+| **API payloads + contract check** | For contract-built schemas, export the rows as the nested, typed request bodies and validate every payload against the contract (JSON Schema 2020-12) before anything is sent. |
 | **REST API + OpenAPI** | Everything the UI does is available under `/api/v1`, documented at `/docs`, with one error contract. |
 
 ## Screenshots
@@ -91,6 +93,14 @@ validation, error resolution and a normalized dataset at the end.
 | Export | Schema Builder |
 |---|---|
 | ![Export](docs/screenshots/08-export.png) | ![Schema Builder](docs/screenshots/10-schema-builder.png) |
+
+| OpenAPI: pick a request body | OpenAPI: generated fields |
+|---|---|
+| ![OpenAPI targets](docs/screenshots/13-openapi-targets.png) | ![OpenAPI fields](docs/screenshots/14-openapi-fields.png) |
+
+| Excel mapped onto the contract | Payloads checked against the contract |
+|---|---|
+| ![OpenAPI mapping](docs/screenshots/15-openapi-mapping.png) | ![Contract check](docs/screenshots/16-contract-check.png) |
 
 <details><summary>Mobile layout</summary>
 
@@ -148,6 +158,17 @@ The walkthrough:
 
 The exact issue counts are asserted in [`tests/test_demo_data.py`](tests/test_demo_data.py).
 
+The API-contract demo uses two more files:
+
+| File | What it is |
+|---|---|
+| `merchant-api.yaml` | OpenAPI 3.1 of a fictional payments API: `POST /v1/merchants` (via `components/requestBodies`, `allOf`, nested `address`, `readOnly id`, `owners[]`, nullable, enums, defaults, `x-aliases`), a `PATCH` with `merge-patch+json`, a multipart upload and `POST /v1/terminals`. |
+| `merchant-onboarding.xlsx` | 120 merchants with spreadsheet headers (`Merchant Ref`, `Legal Name`, `Street`, `City`, `Postcode`, `Settlement Currency`, …): 100 ready · 4 warnings · 16 errors; all 104 importable rows pass the contract check. |
+
+9. **Schemas → Import from OpenAPI → Use sample**, pick `POST /v1/merchants`, review the 18 generated fields (`id` and `owners` are skipped with a reason), **Create schema**.
+10. Import `merchant-onboarding.xlsx` into it — all 17 columns map `HIGH` (`Street → address_line1`, `City → address_city`).
+11. Export → **Check against contract**: *All 104 payloads match POST /v1/merchants*; download `payloads.json`.
+
 ## Import schemas & Schema Builder
 
 A schema is the target data contract. Each field has `name, display_name, type, required,
@@ -161,6 +182,50 @@ contact email` maps `E-mail Address` without any fuzzy logic or AI.
 
 Four schemas ship built in: **Customer Import v1**, **Merchant Import**, **Product Import**,
 **Transaction Import**. Create your own in the UI (`/schemas/new`) or via `POST /api/v1/schemas`.
+
+## Schema from an API contract
+
+Most target systems already have their contract written down: the OpenAPI of the endpoint the
+data will be sent to. Instead of re-typing it in the Schema Builder, load the document and pick
+the request body.
+
+```text
+openapi.yaml ─► inspect ─► POST /v1/merchants ─► preview (fields · skipped · warnings) ─► schema
+                                                                                        │
+Excel ─► map ─► transform ─► validate ─► payloads.json  ◄── contract check (JSON Schema) ┘
+```
+
+**What is translated**
+
+| Contract | Import Schema |
+|---|---|
+| `type: string` + `format: email / uri / date / date-time` | `email / url / date / datetime` |
+| `type: integer`, `type: number` | `integer`, `decimal` (never a float) |
+| `type: boolean` | `boolean` |
+| `enum`, `const` | `enum` with the allowed values |
+| string restricted to 2 / 3 letters on a `*country*` / `*currency*` property | `country` / `currency` (reported as *type inferred*) |
+| `minLength / maxLength / pattern / minimum / maximum / exclusive*` | rules; JSON Schema's "contains" patterns become full-match regexes |
+| `required` (all the way up), `default`, `example`, `description`, `title` | required, default, example, description, display name |
+| nested objects | flattened fields (`address.city` → `address_city`) with the JSON path kept |
+| `x-aliases`, `x-unique` | aliases (deterministic mapping), unique |
+| `$ref` (local), `allOf`, `oneOf` / `anyOf` (object variants merged, `null` variant = nullable), OAS 3.0 `nullable`, 3.1 type lists | resolved before mapping |
+
+**What is skipped — and said so** (never guessed): `readOnly` properties, arrays of objects (one
+row is one request — import the items as another file), free-form maps, binary uploads, recursive
+and external `$ref`. Lists of scalars (`tags: [..]`) are one cell with `;`- or `,`-separated values.
+
+**Payloads.** The schema keeps the dereferenced request body as its *contract*. On export
+(`format=payload`) each row becomes the nested body with real JSON types — integers, exact
+decimals written from `Decimal`, booleans, lists, `null` for required nullable properties —
+and `GET /imports/{id}/contract-check` validates every payload against the contract, returning
+the spreadsheet row, JSON path and failing keyword for each problem. This check found two
+things the per-field validation alone would have let through, both fixed for every schema:
+enum values keep the source casing (`Medium` is now written as the allowed `medium`), and a
+value that could not be normalized (warning) now still has to satisfy explicit rules such as a
+pattern.
+
+Nothing is fetched from the network: only local `#/…` references are resolved, YAML is read with
+the safe loader, documents are limited to 2 MB.
 
 ## Mapping engine
 
@@ -221,16 +286,21 @@ PATCH  /api/v1/imports/{id}/rows/{row}              edit a cell → row revalida
 GET    /api/v1/imports/{id}/bulk-fixes
 POST   /api/v1/imports/{id}/bulk-fixes/replace | /trim
 POST   /api/v1/imports/{id}/undo | /reset-column | /complete
-GET    /api/v1/imports/{id}/export?format=csv|xlsx|json|errors&scope=ready|all|errors
+GET    /api/v1/imports/{id}/export?format=csv|xlsx|json|errors|payload&scope=ready|all|errors
 GET    /api/v1/imports/{id}/report
+GET    /api/v1/imports/{id}/contract-check?scope=     payloads validated against the API contract
 GET|POST /api/v1/schemas, GET|PUT|DELETE /api/v1/schemas/{id}
+GET    /api/v1/schemas/{id}/contract                JSON Schema of the request body
+POST   /api/v1/schemas/from-contract/inspect        OpenAPI / JSON Schema → request bodies
+POST   /api/v1/schemas/from-contract/preview        request body → draft schema (not saved)
+POST   /api/v1/schemas/from-contract                … with overrides → schema
 GET    /api/v1/templates, DELETE /api/v1/templates/{id}
 GET    /api/v1/meta
 ```
 
 Interactive documentation with request/response schemas and examples: **`/docs`**.
 Every error, from every endpoint, has one shape with stable machine-readable codes
-(`invalid_file`, `file_too_large`, `invalid_mapping`, `invalid_state`, `validation_error`, `not_found`):
+(`invalid_file`, `file_too_large`, `invalid_mapping`, `invalid_state`, `validation_error`, `invalid_spec`, `not_found`):
 
 ```json
 {
@@ -288,6 +358,8 @@ app/
 ├── services/
 │   ├── file_parser.py      CSV/XLSX parsing, encoding & delimiter detection, profiling
 │   ├── schema_service.py   schema CRUD + built-in schemas
+│   ├── contract_import.py  OpenAPI / Swagger / JSON Schema → Import Schema + contract
+│   ├── payload_builder.py  rows → nested typed payloads, JSON Schema contract check
 │   ├── mapping_engine.py   saved → exact → normalized → alias → fuzzy → type → AI
 │   ├── normalizers.py      value-level normalizers (phone, country, date, decimal, …)
 │   ├── transformation_engine.py
@@ -298,8 +370,8 @@ app/
 │   └── ai/                 base.py (interface, masking), gemini.py (REST provider)
 ├── templates/              Jinja2 + Alpine.js (wizard steps in templates/steps/)
 └── static/                 compiled Tailwind CSS, vendored Alpine.js (generated, see below)
-tests/                      141 tests
-demo-data/                  generator + three demo files
+tests/                      170 tests
+demo-data/                  generator + demo files (three customer files, merchant API + sheet)
 scripts/browser_demo.py     Playwright end-to-end demo + screenshots
 scripts/build_frontend.sh   rebuilds app.css + alpine.min.js from pinned npm packages
 ```
@@ -321,7 +393,7 @@ the standard library instead of pandas on purpose: no float coercion, no `NaN`, 
 ## Tests
 
 ```bash
-pytest            # 141 tests, ~15 s
+pytest            # 170 tests, ~15 s
 ruff check . && ruff format --check .
 ```
 
@@ -348,12 +420,18 @@ files up to tens of thousands of rows, not millions.
   local-language names; exotic spellings become `Unknown country` with a suggested bulk fix.
 * Phone validation is as strict as libphonenumber: fictional ranges are flagged, not "fixed".
 * The AI level only sees masked samples, which limits what it can infer — by design.
+* Contracts: one spreadsheet row is one request body; arrays of objects and free-form maps are
+  skipped, `$ref` must be local, specs are pasted/uploaded (no URL fetching). Per-row validation
+  covers field-level rules; everything else (e.g. `required` inside an optional object,
+  `multipleOf`, ECMA-only regex syntax) is enforced by the contract check.
 * Swagger UI (`/docs`) loads its assets from a CDN.
 
 ## Roadmap
 
 * Workspaces / users and API keys
-* Import targets: webhooks and direct database / CRM connectors
+* Import targets: webhooks and direct database / CRM connectors; send contract payloads straight
+  to the API (dry-run → batch POST with per-row results)
+* Contracts: arrays of objects from a child sheet joined by key; response-schema imports
 * Streaming parser for very large files
 * Schema import/export (JSON) and versioned schema history
 * Per-schema custom normalizers and enum synonyms
