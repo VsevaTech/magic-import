@@ -40,6 +40,7 @@
                 <td>
                   <input class="input font-mono !py-1.5" placeholder="field_name" x-model="f.name" @input="f.name = f.name.replace(/[^A-Za-z0-9_]/g, '_')">
                   <p x-show="errors[f._key]" class="mt-1 text-xs text-rose-600" x-text="errors[f._key]"></p>
+                  <p x-show="f.source" class="mt-1 text-[11px] text-emerald-700 font-mono" x-text="f.source ? '↳ ' + f.source.path.join('.') : ''" title="JSON path in the API contract"></p>
                 </td>
                 <td>
                   <select class="select !py-1.5" x-model="f.type">
@@ -146,7 +147,7 @@ function schemaBuilder() {
   const wrap = (f) => ({
     _key: ++key, name: f.name || '', display_name: f.display_name || '', type: f.type || 'string', required: !!f.required, unique: !!f.unique,
     description: f.description || '', aliases_str: (f.aliases || []).join(', '), example: f.example || '', default: f.default || '',
-    allow_multiple_sources: !!f.allow_multiple_sources,
+    allow_multiple_sources: !!f.allow_multiple_sources, source: f.source || null,
     rules: Object.assign({ enum_str: (f.rules && f.rules.enum ? f.rules.enum.join(', ') : '') }, f.rules || {}),
   });
   const s = window.SCHEMA;
@@ -173,7 +174,7 @@ function schemaBuilder() {
           if (f.type === 'enum' && f.rules.enum_str) rules.enum = f.rules.enum_str.split(',').map(x => x.trim()).filter(Boolean);
           return {
             name: f.name.trim(), display_name: f.display_name || null, type: f.type, required: f.required, unique: f.unique, description: f.description,
-            aliases: f.aliases_str.split(',').map(x => x.trim()).filter(Boolean), example: f.example, default: f.default || null, rules, allow_multiple_sources: f.allow_multiple_sources,
+            aliases: f.aliases_str.split(',').map(x => x.trim()).filter(Boolean), example: f.example, default: f.default || null, rules, allow_multiple_sources: f.allow_multiple_sources, source: f.source,
           };
         }),
       };
